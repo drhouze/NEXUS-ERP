@@ -1,0 +1,1031 @@
+     1→     1→     1→// Multi-Tenant ERP Prisma Schema
+     2→     2→     2→
+     3→     3→     3→generator client {
+     4→     4→     4→  provider = "prisma-client-js"
+     5→     5→     5→}
+     6→     6→     6→
+     7→     7→     7→datasource db {
+     8→     8→     8→  provider = "sqlite"
+     9→     9→     9→  url      = env("DATABASE_URL")
+    10→    10→    10→}
+    11→    11→    11→
+    12→    12→    12→// ============ Multi-Tenancy ============
+    13→    13→    13→model Tenant {
+    14→    14→    14→  id              String   @id @default(cuid())
+    15→    15→    15→  name            String
+    16→    16→    16→  industry        String   @default("General")
+    17→    17→    17→  plan            String   @default("starter") // starter | pro | enterprise
+    18→    18→    18→  status          String   @default("active")  // active | suspended | cancelled
+    19→    19→    19→  seats           Int      @default(10)
+    20→    20→    20→  logoUrl         String?
+    21→    21→    21→  primaryColor    String?
+    22→    22→    22→  suspendedAt     DateTime?
+    23→    23→    23→  suspendedReason String?
+    24→    24→    24→  createdAt       DateTime @default(now())
+    25→    25→    25→  updatedAt       DateTime @updatedAt
+    26→    26→    26→
+    27→    27→    27→  users           User[]
+    28→    28→    28→  products        Product[]
+    29→    29→    29→  customers       Customer[]
+    30→    30→    30→  suppliers       Supplier[]
+    31→    31→    31→  employees       Employee[]
+    32→    32→    32→  salesOrders     SalesOrder[]
+    33→    33→    33→  purchaseOrders  PurchaseOrder[]
+    34→    34→    34→  transactions    Transaction[]
+    35→    35→    35→  activities      Activity[]
+    36→    36→    36→  auditLogs       AuditLog[]
+    37→    37→    37→  notifications   Notification[]
+    38→    38→    38→  roles           Role[]
+    39→    39→    39→  webhooks        Webhook[]
+    40→    40→    40→  apiKeys         ApiKey[]
+    41→    41→    41→  emailLogs       EmailLog[]
+    42→    42→    42→  ssoConfig       SsoConfig?
+    43→    43→    43→  retentionSetting DataRetentionSetting?
+    44→    44→    44→  numberSetting   TenantNumberSetting?
+    45→    45→    45→  payments        Payment[]
+    46→    46→    46→  accounts        Account[]
+    47→    47→    47→  journalEntries  JournalEntry[]
+    48→    48→    48→  warehouses      Warehouse[]
+    49→    49→    49→  stockMovements  StockMovement[]
+    50→    50→    50→  serialNumbers   SerialNumber[]
+    51→    51→    51→  batches         Batch[]
+    52→    52→    52→  costLayers      CostLayer[]
+    53→    53→    53→  stockTakes      StockTake[]
+    54→    54→    54→  boms            BillOfMaterial[]
+    55→    55→    55→  currencies      Currency[]
+    56→    56→    56→  exchangeRates   ExchangeRate[]
+    57→    57→    57→  workflows       Workflow[]
+    58→    58→    58→  workflowExecutions WorkflowExecution[]
+    59→    59→    59→  duitNowSettings DuitNowSettings?
+    60→    60→    60→  customFields    CustomField[]
+    61→    61→    61→  customTabs      CustomTab[]
+    62→    62→    62→  statusPipelines StatusPipeline[]
+    63→    63→    63→  recordNotes     RecordNote[]
+    64→    64→    64→  moduleLabels    ModuleLabel[]
+    65→    65→    65→  fileAttachments FileAttachment[]
+    66→    66→    66→  invoiceTemplate InvoiceTemplate?
+    67→    67→    67→  encounters     ClinicalEncounter[]
+    68→    68→    68→  encounterTemplate EncounterTemplate?
+    69→    69→    69→  documentTemplates DocumentTemplate[]
+    70→    70→    70→}
+    71→    71→    71→
+    72→    72→    72→model User {
+    73→    73→    73→  id                  String   @id @default(cuid())
+    74→    74→    74→  email               String   @unique
+    75→    75→    75→  password            String
+    76→    76→    76→  name                String
+    77→    77→    77→  role                String   // OWNER | TENANT_ADMIN | MANAGER | EMPLOYEE | CUSTOM
+    78→    78→    78→  tenantId            String?
+    79→    79→    79→  status              String   @default("active") // active | disabled
+    80→    80→    80→  emailVerified       DateTime?
+    81→    81→    81→  lastLoginAt         DateTime?
+    82→    82→    82→  // 2FA fields
+    83→    83→    83→  twoFactorSecret     String?
+    84→    84→    84→  twoFactorEnabled    Boolean  @default(false)
+    85→    85→    85→  twoFactorBackupCodes String? // JSON array of hashed backup codes
+    86→    86→    86→  // Custom role (when role === 'CUSTOM')
+    87→    87→    87→  customRoleId        String?
+    88→    88→    88→  // Impersonation tracking
+    89→    89→    89→  impersonatedBy      String?  // userId of the OWNER who is impersonating
+    90→    90→    90→  createdAt           DateTime @default(now())
+    91→    91→    91→  updatedAt           DateTime @updatedAt
+    92→    92→    92→
+    93→    93→    93→  tenant              Tenant?  @relation(fields: [tenantId], references: [id])
+    94→    94→    94→  customRole          Role?    @relation(fields: [customRoleId], references: [id])
+    95→    95→    95→  passwordResets      PasswordResetToken[]
+    96→    96→    96→  emailVerifications  EmailVerificationToken[]
+    97→    97→    97→  auditLogs           AuditLog[]
+    98→    98→    98→}
+    99→    99→    99→
+   100→   100→   100→model PasswordResetToken {
+   101→   101→   101→  id        String   @id @default(cuid())
+   102→   102→   102→  userId    String
+   103→   103→   103→  token     String   @unique
+   104→   104→   104→  expiresAt DateTime
+   105→   105→   105→  usedAt    DateTime?
+   106→   106→   106→  createdAt DateTime @default(now())
+   107→   107→   107→
+   108→   108→   108→  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   109→   109→   109→}
+   110→   110→   110→
+   111→   111→   111→model EmailVerificationToken {
+   112→   112→   112→  id        String   @id @default(cuid())
+   113→   113→   113→  userId    String
+   114→   114→   114→  token     String   @unique
+   115→   115→   115→  expiresAt DateTime
+   116→   116→   116→  usedAt    DateTime?
+   117→   117→   117→  createdAt DateTime @default(now())
+   118→   118→   118→
+   119→   119→   119→  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+   120→   120→   120→}
+   121→   121→   121→
+   122→   122→   122→// ============ Audit Log ============
+   123→   123→   123→model AuditLog {
+   124→   124→   124→  id         String   @id @default(cuid())
+   125→   125→   125→  tenantId   String?
+   126→   126→   126→  actorId    String?
+   127→   127→   127→  actorEmail String
+   128→   128→   128→  actorRole  String
+   129→   129→   129→  action     String   // create | update | delete | suspend | unsuspend | upgrade | login | logout | backup_export | backup_import
+   130→   130→   130→  entityType String   // tenant | user | product | customer | order | purchase_order | employee | transaction | plan
+   131→   131→   131→  entityId   String?
+   132→   132→   132→  entityName String?
+   133→   133→   133→  summary    String
+   134→   134→   134→  metadata   String?  // JSON string of changes
+   135→   135→   135→  ipAddress  String?
+   136→   136→   136→  createdAt  DateTime @default(now())
+   137→   137→   137→
+   138→   138→   138→  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   139→   139→   139→  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+   140→   140→   140→
+   141→   141→   141→  @@index([tenantId, createdAt])
+   142→   142→   142→  @@index([actorId])
+   143→   143→   143→  @@index([entityType, entityId])
+   144→   144→   144→}
+   145→   145→   145→
+   146→   146→   146→// ============ Notifications ============
+   147→   147→   147→model Notification {
+   148→   148→   148→  id        String   @id @default(cuid())
+   149→   149→   149→  tenantId  String
+   150→   150→   150→  userId    String?  // null = broadcast to whole tenant
+   151→   151→   151→  type      String   // info | success | warning | error
+   152→   152→   152→  category  String   // order | inventory | customer | finance | hr | system | purchase
+   153→   153→   153→  title     String
+   154→   154→   154→  message   String
+   155→   155→   155→  link      String?
+   156→   156→   156→  read      Boolean  @default(false)
+   157→   157→   157→  createdAt DateTime @default(now())
+   158→   158→   158→
+   159→   159→   159→  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   160→   160→   160→
+   161→   161→   161→  @@index([tenantId, userId, read])
+   162→   162→   162→}
+   163→   163→   163→
+   164→   164→   164→// ============ Inventory ============
+   165→   165→   165→model Product {
+   166→   166→   166→  id           String   @id @default(cuid())
+   167→   167→   167→  tenantId     String
+   168→   168→   168→  sku          String
+   169→   169→   169→  name         String
+   170→   170→   170→  category     String
+   171→   171→   171→  price        Float
+   172→   172→   172→  cost         Float
+   173→   173→   173→  stockQty     Int
+   174→   174→   174→  reorderLevel Int
+   175→   175→   175→  reorderQty   Int      @default(50)  // how much to order when reordering
+   176→   176→   176→  warehouse    String   // legacy field - kept for backwards compat
+   177→   177→   177→  warehouseId  String?  // links to Warehouse model (nullable for migration)
+   178→   178→   178→  supplierId   String?
+   179→   179→   179→  createdAt    DateTime @default(now())
+   180→   180→   180→  updatedAt    DateTime @updatedAt
+   181→   181→   181→
+   182→   182→   182→  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   183→   183→   183→  supplier     Supplier? @relation(fields: [supplierId], references: [id])
+   184→   184→   184→  warehouseRel Warehouse? @relation(fields: [warehouseId], references: [id])
+   185→   185→   185→  orderItems   SalesOrderItem[]
+   186→   186→   186→  poItems      PurchaseOrderItem[]
+   187→   187→   187→  stockMovements StockMovement[]
+   188→   188→   188→  serialNumbers SerialNumber[]
+   189→   189→   189→  batches      Batch[]
+   190→   190→   190→  costLayers   CostLayer[]
+   191→   191→   191→  stockTakeItems StockTakeItem[]
+   192→   192→   192→  boms         BillOfMaterial[]
+   193→   193→   193→  bomComponents BOMComponent[]
+   194→   194→   194→
+   195→   195→   195→  @@unique([tenantId, sku])
+   196→   196→   196→}
+   197→   197→   197→
+   198→   198→   198→// ============ Warehouses ============
+   199→   199→   199→model Warehouse {
+   200→   200→   200→  id          String   @id @default(cuid())
+   201→   201→   201→  tenantId    String
+   202→   202→   202→  code        String   // e.g. "WH-NORTH"
+   203→   203→   203→  name        String   // e.g. "North Warehouse"
+   204→   204→   204→  address     String?
+   205→   205→   205→  isDefault   Boolean  @default(false)
+   206→   206→   206→  createdAt   DateTime @default(now())
+   207→   207→   207→
+   208→   208→   208→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   209→   209→   209→  products    Product[]
+   210→   210→   210→  stockMovements StockMovement[]
+   211→   211→   211→  serialNumbers SerialNumber[]
+   212→   212→   212→  batches     Batch[]
+   213→   213→   213→  stockTakes  StockTake[]
+   214→   214→   214→
+   215→   215→   215→  @@unique([tenantId, code])
+   216→   216→   216→}
+   217→   217→   217→
+   218→   218→   218→// ============ Stock Movements (audit log for all stock changes) ============
+   219→   219→   219→model StockMovement {
+   220→   220→   220→  id          String   @id @default(cuid())
+   221→   221→   221→  tenantId    String
+   222→   222→   222→  productId   String
+   223→   223→   223→  warehouseId String?
+   224→   224→   224→  type        String   // in | out | adjustment | transfer_in | transfer_out
+   225→   225→   225→  quantity    Int      // positive for in, negative for out
+   226→   226→   226→  reason      String   // received_po | sales_order | adjustment | transfer | return | initial
+   227→   227→   227→  refType     String?  // purchase_order | sales_order | manual
+   228→   228→   228→  refId       String?
+   229→   229→   229→  notes       String?
+   230→   230→   230→  fromWarehouseId String? // for transfers
+   231→   231→   231→  toWarehouseId   String? // for transfers
+   232→   232→   232→  createdAt   DateTime @default(now())
+   233→   233→   233→
+   234→   234→   234→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   235→   235→   235→  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+   236→   236→   236→  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+   237→   237→   237→
+   238→   238→   238→  @@index([tenantId, productId])
+   239→   239→   239→  @@index([tenantId, createdAt])
+   240→   240→   240→}
+   241→   241→   241→
+   242→   242→   242→// ============ Serial Number Tracking ============
+   243→   243→   243→model SerialNumber {
+   244→   244→   244→  id          String   @id @default(cuid())
+   245→   245→   245→  tenantId    String
+   246→   246→   246→  productId   String
+   247→   247→   247→  serialNumber String
+   248→   248→   248→  warehouseId String?
+   249→   249→   249→  status      String   @default("in_stock") // in_stock | sold | returned | defective
+   250→   250→   250→  soldAt      DateTime?
+   251→   251→   251→  createdAt   DateTime @default(now())
+   252→   252→   252→
+   253→   253→   253→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   254→   254→   254→  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+   255→   255→   255→  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+   256→   256→   256→
+   257→   257→   257→  @@unique([tenantId, serialNumber])
+   258→   258→   258→  @@index([tenantId, productId])
+   259→   259→   259→}
+   260→   260→   260→
+   261→   261→   261→// ============ Batch / Lot Tracking ============
+   262→   262→   262→model Batch {
+   263→   263→   263→  id          String   @id @default(cuid())
+   264→   264→   264→  tenantId    String
+   265→   265→   265→  productId   String
+   266→   266→   266→  batchNumber String
+   267→   267→   267→  warehouseId String?
+   268→   268→   268→  quantity    Int
+   269→   269→   269→  manufactureDate DateTime?
+   270→   270→   270→  expiryDate  DateTime?
+   271→   271→   271→  status      String   @default("active") // active | expired | consumed
+   272→   272→   272→  createdAt   DateTime @default(now())
+   273→   273→   273→
+   274→   274→   274→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   275→   275→   275→  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+   276→   276→   276→  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+   277→   277→   277→
+   278→   278→   278→  @@unique([tenantId, batchNumber])
+   279→   279→   279→  @@index([tenantId, productId])
+   280→   280→   280→}
+   281→   281→   281→
+   282→   282→   282→// ============ Cost Layers (FIFO/LIFO costing) ============
+   283→   283→   283→model CostLayer {
+   284→   284→   284→  id          String   @id @default(cuid())
+   285→   285→   285→  tenantId    String
+   286→   286→   286→  productId   String
+   287→   287→   287→  quantity    Int      // remaining quantity in this layer
+   288→   288→   288→  unitCost    Float    // cost per unit when this layer was created
+   289→   289→   289→  poId        String?  // linked PO that created this layer
+   290→   290→   290→  createdAt   DateTime @default(now())
+   291→   291→   291→
+   292→   292→   292→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   293→   293→   293→  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+   294→   294→   294→
+   295→   295→   295→  @@index([tenantId, productId])
+   296→   296→   296→}
+   297→   297→   297→
+   298→   298→   298→// ============ Stock Take / Audit ============
+   299→   299→   299→model StockTake {
+   300→   300→   300→  id          String   @id @default(cuid())
+   301→   301→   301→  tenantId    String
+   302→   302→   302→  warehouseId String?
+   303→   303→   303→  status      String   @default("draft") // draft | in_progress | completed | cancelled
+   304→   304→   304→  notes       String?
+   305→   305→   305→  startedAt   DateTime?
+   306→   306→   306→  completedAt DateTime?
+   307→   307→   307→  createdAt   DateTime @default(now())
+   308→   308→   308→
+   309→   309→   309→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   310→   310→   310→  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+   311→   311→   311→  items       StockTakeItem[]
+   312→   312→   312→}
+   313→   313→   313→
+   314→   314→   314→model StockTakeItem {
+   315→   315→   315→  id          String   @id @default(cuid())
+   316→   316→   316→  stockTakeId String
+   317→   317→   317→  productId   String
+   318→   318→   318→  systemQty   Int      // what the system thinks
+   319→   319→   319→  countedQty  Int?     // what was actually counted
+   320→   320→   320→  variance    Int?     // counted - system
+   321→   321→   321→  notes       String?
+   322→   322→   322→
+   323→   323→   323→  stockTake   StockTake @relation(fields: [stockTakeId], references: [id], onDelete: Cascade)
+   324→   324→   324→  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+   325→   325→   325→}
+   326→   326→   326→
+   327→   327→   327→// ============ Bill of Materials / Kits ============
+   328→   328→   328→model BillOfMaterial {
+   329→   329→   329→  id          String   @id @default(cuid())
+   330→   330→   330→  tenantId    String
+   331→   331→   331→  productId   String   // the kit/parent product
+   332→   332→   332→  isActive    Boolean  @default(true)
+   333→   333→   333→  createdAt   DateTime @default(now())
+   334→   334→   334→
+   335→   335→   335→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   336→   336→   336→  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+   337→   337→   337→  components   BOMComponent[]
+   338→   338→   338→}
+   339→   339→   339→
+   340→   340→   340→model BOMComponent {
+   341→   341→   341→  id          String   @id @default(cuid())
+   342→   342→   342→  bomId       String
+   343→   343→   343→  componentProductId String
+   344→   344→   344→  quantity    Int      // how many of this component per 1 kit
+   345→   345→   345→
+   346→   346→   346→  bom         BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Cascade)
+   347→   347→   347→  component   Product  @relation(fields: [componentProductId], references: [id], onDelete: Cascade)
+   348→   348→   348→}
+   349→   349→   349→
+   350→   350→   350→// ============ CRM ============
+   351→   351→   351→model Customer {
+   352→   352→   352→  id         String   @id @default(cuid())
+   353→   353→   353→  tenantId   String
+   354→   354→   354→  name       String
+   355→   355→   355→  email      String
+   356→   356→   356→  phone      String
+   357→   357→   357→  company    String
+   358→   358→   358→  status     String   @default("lead") // lead | active | inactive
+   359→   359→   359→  totalSpent Float    @default(0)
+   360→   360→   360→  createdAt  DateTime @default(now())
+   361→   361→   361→  updatedAt  DateTime @updatedAt
+   362→   362→   362→
+   363→   363→   363→  // First-class personal info
+   364→   364→   364→  dateOfBirth DateTime?
+   365→   365→   365→  gender      String?
+   366→   366→   366→  idType      String?     // IC | Passport | Other
+   367→   367→   367→  idNumber    String?
+   368→   368→   368→  nationality String?
+   369→   369→   369→  occupation  String?
+   370→   370→   370→
+   371→   371→   371→  // CRM lifecycle
+   372→   372→   372→  lifecycleStage String?  @default("lead")
+   373→   373→   373→  leadSource     String?
+   374→   374→   374→  ownerId        String?
+   375→   375→   375→  tags           String?  // JSON array
+   376→   376→   376→  lastContactAt  DateTime?
+   377→   377→   377→
+   378→   378→   378→  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   379→   379→   379→  orders     SalesOrder[]
+   380→   380→   380→  encounters ClinicalEncounter[]
+   381→   381→   381→
+   382→   382→   382→  @@unique([tenantId, email])
+   383→   383→   383→}
+   384→   384→   384→
+   385→   385→   385→// ============ Sales Orders ============
+   386→   386→   386→model SalesOrder {
+   387→   387→   387→  id          String   @id @default(cuid())
+   388→   388→   388→  tenantId    String
+   389→   389→   389→  orderNumber String
+   390→   390→   390→  customerId  String
+   391→   391→   391→  status      String   @default("pending") // pending | processing | shipped | delivered | cancelled
+   392→   392→   392→  total       Float
+   393→   393→   393→  paidAmount  Float    @default(0)
+   394→   394→   394→  currency    String   @default("USD")
+   395→   395→   395→  exchangeRate Float   @default(1) // rate to base currency at time of creation
+   396→   396→   396→  createdAt   DateTime @default(now())
+   397→   397→   397→  updatedAt   DateTime @updatedAt
+   398→   398→   398→
+   399→   399→   399→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   400→   400→   400→  customer    Customer @relation(fields: [customerId], references: [id])
+   401→   401→   401→  items       SalesOrderItem[]
+   402→   402→   402→  payments    Payment[]
+   403→   403→   403→  encounter   ClinicalEncounter?
+   404→   404→   404→
+   405→   405→   405→  @@unique([tenantId, orderNumber])
+   406→   406→   406→}
+   407→   407→   407→
+   408→   408→   408→model SalesOrderItem {
+   409→   409→   409→  id         String     @id @default(cuid())
+   410→   410→   410→  orderId    String
+   411→   411→   411→  productId  String
+   412→   412→   412→  qty        Int
+   413→   413→   413→  unitPrice  Float
+   414→   414→   414→
+   415→   415→   415→  order      SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   416→   416→   416→  product    Product    @relation(fields: [productId], references: [id])
+   417→   417→   417→}
+   418→   418→   418→
+   419→   419→   419→// ============ Purchasing ============
+   420→   420→   420→model Supplier {
+   421→   421→   421→  id          String   @id @default(cuid())
+   422→   422→   422→  tenantId    String
+   423→   423→   423→  name        String
+   424→   424→   424→  contactName String
+   425→   425→   425→  email       String
+   426→   426→   426→  phone       String
+   427→   427→   427→  country     String
+   428→   428→   428→  rating      Int      @default(3)
+   429→   429→   429→  createdAt   DateTime @default(now())
+   430→   430→   430→
+   431→   431→   431→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   432→   432→   432→  products    Product[]
+   433→   433→   433→  purchaseOrders PurchaseOrder[]
+   434→   434→   434→
+   435→   435→   435→  @@unique([tenantId, name])
+   436→   436→   436→}
+   437→   437→   437→
+   438→   438→   438→model PurchaseOrder {
+   439→   439→   439→  id         String   @id @default(cuid())
+   440→   440→   440→  tenantId   String
+   441→   441→   441→  poNumber   String
+   442→   442→   442→  supplierId String
+   443→   443→   443→  status     String   @default("draft") // draft | sent | received | cancelled
+   444→   444→   444→  total      Float
+   445→   445→   445→  currency   String   @default("USD")
+   446→   446→   446→  exchangeRate Float  @default(1)
+   447→   447→   447→  createdAt  DateTime @default(now())
+   448→   448→   448→  updatedAt  DateTime @updatedAt
+   449→   449→   449→
+   450→   450→   450→  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   451→   451→   451→  supplier   Supplier @relation(fields: [supplierId], references: [id])
+   452→   452→   452→  items      PurchaseOrderItem[]
+   453→   453→   453→
+   454→   454→   454→  @@unique([tenantId, poNumber])
+   455→   455→   455→}
+   456→   456→   456→
+   457→   457→   457→model PurchaseOrderItem {
+   458→   458→   458→  id         String         @id @default(cuid())
+   459→   459→   459→  poId       String
+   460→   460→   460→  productId  String
+   461→   461→   461→  qty        Int
+   462→   462→   462→  unitCost   Float
+   463→   463→   463→
+   464→   464→   464→  po         PurchaseOrder  @relation(fields: [poId], references: [id], onDelete: Cascade)
+   465→   465→   465→  product    Product        @relation(fields: [productId], references: [id])
+   466→   466→   466→}
+   467→   467→   467→
+   468→   468→   468→// ============ HR ============
+   469→   469→   469→model Employee {
+   470→   470→   470→  id         String   @id @default(cuid())
+   471→   471→   471→  tenantId   String
+   472→   472→   472→  name       String
+   473→   473→   473→  email      String
+   474→   474→   474→  department String
+   475→   475→   475→  role       String
+   476→   476→   476→  salary     Float
+   477→   477→   477→  hireDate   DateTime
+   478→   478→   478→  status     String   @default("active") // active | on_leave | terminated
+   479→   479→   479→  createdAt  DateTime @default(now())
+   480→   480→   480→
+   481→   481→   481→  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   482→   482→   482→}
+   483→   483→   483→
+   484→   484→   484→// ============ Finance ============
+   485→   485→   485→model Transaction {
+   486→   486→   486→  id          String   @id @default(cuid())
+   487→   487→   487→  tenantId    String
+   488→   488→   488→  type        String   // income | expense
+   489→   489→   489→  category    String
+   490→   490→   490→  amount      Float
+   491→   491→   491→  description String
+   492→   492→   492→  date        DateTime
+   493→   493→   493→  refType     String?
+   494→   494→   494→  refId       String?
+   495→   495→   495→  createdAt   DateTime @default(now())
+   496→   496→   496→
+   497→   497→   497→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   498→   498→   498→}
+   499→   499→   499→
+   500→   500→   500→// ============ Activity Feed ============
+   501→   501→   501→model Activity {
+   502→   502→   502→  id        String   @id @default(cuid())
+   503→   503→   503→  tenantId  String
+   504→   504→   504→  type      String   // order | inventory | customer | finance | hr | purchase
+   505→   505→   505→  message   String
+   506→   506→   506→  createdAt DateTime @default(now())
+   507→   507→   507→
+   508→   508→   508→  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   509→   509→   509→}
+   510→   510→   510→
+   511→   511→   511→// ============ Custom Roles ============
+   512→   512→   512→model Role {
+   513→   513→   513→  id          String   @id @default(cuid())
+   514→   514→   514→  tenantId    String
+   515→   515→   515→  name        String
+   516→   516→   516→  description String?
+   517→   517→   517→  permissions String   // JSON: { module: [perm, perm], ... }
+   518→   518→   518→  isSystem    Boolean  @default(false)
+   519→   519→   519→  createdAt   DateTime @default(now())
+   520→   520→   520→  updatedAt   DateTime @updatedAt
+   521→   521→   521→
+   522→   522→   522→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   523→   523→   523→  users       User[]
+   524→   524→   524→
+   525→   525→   525→  @@unique([tenantId, name])
+   526→   526→   526→}
+   527→   527→   527→
+   528→   528→   528→// ============ Webhooks ============
+   529→   529→   529→model Webhook {
+   530→   530→   530→  id          String   @id @default(cuid())
+   531→   531→   531→  tenantId    String
+   532→   532→   532→  url         String
+   533→   533→   533→  secret      String?
+   534→   534→   534→  events      String   // JSON array: ["order.created", "customer.created", ...]
+   535→   535→   535→  isActive    Boolean  @default(true)
+   536→   536→   536→  createdAt   DateTime @default(now())
+   537→   537→   537→
+   538→   538→   538→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   539→   539→   539→  deliveries  WebhookDelivery[]
+   540→   540→   540→
+   541→   541→   541→  @@index([tenantId, isActive])
+   542→   542→   542→}
+   543→   543→   543→
+   544→   544→   544→model WebhookDelivery {
+   545→   545→   545→  id          String   @id @default(cuid())
+   546→   546→   546→  webhookId   String
+   547→   547→   547→  event       String
+   548→   548→   548→  payload     String   // JSON
+   549→   549→   549→  status      String   @default("pending") // pending | success | failed
+   550→   550→   550→  statusCode  Int?
+   551→   551→   551→  response    String?
+   552→   552→   552→  attempts    Int      @default(0)
+   553→   553→   553→  deliveredAt DateTime?
+   554→   554→   554→  createdAt   DateTime @default(now())
+   555→   555→   555→
+   556→   556→   556→  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+   557→   557→   557→}
+   558→   558→   558→
+   559→   559→   559→// ============ API Keys ============
+   560→   560→   560→model ApiKey {
+   561→   561→   561→  id          String   @id @default(cuid())
+   562→   562→   562→  tenantId    String
+   563→   563→   563→  name        String
+   564→   564→   564→  keyHash     String
+   565→   565→   565→  keyPrefix   String   // first 12 chars for display
+   566→   566→   566→  scopes      String   // JSON: ["read:products", "write:orders", ...]
+   567→   567→   567→  lastUsedAt  DateTime?
+   568→   568→   568→  expiresAt   DateTime?
+   569→   569→   569→  isActive    Boolean  @default(true)
+   570→   570→   570→  createdAt   DateTime @default(now())
+   571→   571→   571→
+   572→   572→   572→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   573→   573→   573→
+   574→   574→   574→  @@index([tenantId, isActive])
+   575→   575→   575→}
+   576→   576→   576→
+   577→   577→   577→// ============ Email Log (email service audit trail) ============
+   578→   578→   578→model EmailLog {
+   579→   579→   579→  id          String   @id @default(cuid())
+   580→   580→   580→  tenantId    String?
+   581→   581→   581→  to          String
+   582→   582→   582→  subject     String
+   583→   583→   583→  body        String
+   584→   584→   584→  type        String   // password_reset | notification | welcome | 2fa_setup | webhook_failure
+   585→   585→   585→  status      String   @default("sent")
+   586→   586→   586→  createdAt   DateTime @default(now())
+   587→   587→   587→
+   588→   588→   588→  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   589→   589→   589→}
+   590→   590→   590→
+   591→   591→   591→// ============ SSO Configuration ============
+   592→   592→   592→model SsoConfig {
+   593→   593→   593→  id          String   @id @default(cuid())
+   594→   594→   594→  tenantId    String   @unique
+   595→   595→   595→  provider    String   // saml | oidc
+   596→   596→   596→  entityId    String?
+   597→   597→   597→  ssoUrl      String?
+   598→   598→   598→  certificate String?
+   599→   599→   599→  isActive    Boolean  @default(false)
+   600→   600→   600→  createdAt   DateTime @default(now())
+   601→   601→   601→  updatedAt   DateTime @updatedAt
+   602→   602→   602→
+   603→   603→   603→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   604→   604→   604→}
+   605→   605→   605→
+   606→   606→   606→// ============ Data Retention Settings ============
+   607→   607→   607→model DataRetentionSetting {
+   608→   608→   608→  id               String   @id @default(cuid())
+   609→   609→   609→  tenantId         String   @unique
+   610→   610→   610→  auditLogDays     Int      @default(365)
+   611→   611→   611→  notificationDays Int      @default(90)
+   612→   612→   612→  emailLogDays     Int      @default(90)
+   613→   613→   613→  autoArchive      Boolean  @default(true)
+   614→   614→   614→  lastRunAt        DateTime?
+   615→   615→   615→  createdAt        DateTime @default(now())
+   616→   616→   616→  updatedAt        DateTime @updatedAt
+   617→   617→   617→
+   618→   618→   618→  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   619→   619→   619→}
+   620→   620→   620→
+   621→   621→   621→// ============ Tenant Number Settings (prefixes + counters) ============
+   622→   622→   622→model TenantNumberSetting {
+   623→   623→   623→  id                   String   @id @default(cuid())
+   624→   624→   624→  tenantId             String   @unique
+   625→   625→   625→  salesOrderPrefix     String   @default("SO-")
+   626→   626→   626→  salesOrderStart      Int      @default(1000)
+   627→   627→   627→  salesOrderCounter    Int      @default(0)
+   628→   628→   628→  purchaseOrderPrefix  String   @default("PO-")
+   629→   629→   629→  purchaseOrderStart   Int      @default(2000)
+   630→   630→   630→  purchaseOrderCounter Int      @default(0)
+   631→   631→   631→  invoicePrefix        String   @default("INV-")
+   632→   632→   632→  invoiceStart         Int      @default(3000)
+   633→   633→   633→  invoiceCounter       Int      @default(0)
+   634→   634→   634→  customerPrefix       String   @default("CUST-")
+   635→   635→   635→  customerStart        Int      @default(1000)
+   636→   636→   636→  customerCounter      Int      @default(0)
+   637→   637→   637→  supplierPrefix       String   @default("SUPP-")
+   638→   638→   638→  supplierStart        Int      @default(1000)
+   639→   639→   639→  supplierCounter      Int      @default(0)
+   640→   640→   640→  productPrefix        String   @default("SKU-")
+   641→   641→   641→  productStart         Int      @default(1000)
+   642→   642→   642→  productCounter       Int      @default(0)
+   643→   643→   643→  employeePrefix       String   @default("EMP-")
+   644→   644→   644→  employeeStart        Int      @default(1000)
+   645→   645→   645→  employeeCounter      Int      @default(0)
+   646→   646→   646→  transactionPrefix    String   @default("TXN-")
+   647→   647→   647→  transactionStart     Int      @default(10000)
+   648→   648→   648→  transactionCounter   Int      @default(0)
+   649→   649→   649→  createdAt            DateTime @default(now())
+   650→   650→   650→  updatedAt            DateTime @updatedAt
+   651→   651→   651→
+   652→   652→   652→  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   653→   653→   653→}
+   654→   654→   654→
+   655→   655→   655→// ============ Payments (for sales orders) ============
+   656→   656→   656→model Payment {
+   657→   657→   657→  id          String   @id @default(cuid())
+   658→   658→   658→  tenantId    String
+   659→   659→   659→  orderId     String
+   660→   660→   660→  amount      Float
+   661→   661→   661→  currency    String   @default("USD")
+   662→   662→   662→  method      String   @default("cash") // cash | card | bank_transfer | check | other
+   663→   663→   663→  reference   String?  // check #, transaction ID, etc.
+   664→   664→   664→  notes       String?
+   665→   665→   665→  createdAt   DateTime @default(now())
+   666→   666→   666→
+   667→   667→   667→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   668→   668→   668→  order       SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   669→   669→   669→
+   670→   670→   670→  @@index([tenantId, orderId])
+   671→   671→   671→}
+   672→   672→   672→
+   673→   673→   673→// ============ Accounting: Chart of Accounts ============
+   674→   674→   674→model Account {
+   675→   675→   675→  id          String   @id @default(cuid())
+   676→   676→   676→  tenantId    String
+   677→   677→   677→  code        String   // e.g. "1000", "2000", "4000"
+   678→   678→   678→  name        String   // e.g. "Cash", "Accounts Receivable", "Sales Revenue"
+   679→   679→   679→  type        String   // asset | liability | equity | revenue | expense
+   680→   680→   680→  subType     String?  // current_asset, fixed_asset, current_liability, etc.
+   681→   681→   681→  balance     Float    @default(0)  // running balance (debit - credit for assets/expenses, credit - debit for liabilities/equity/revenue)
+   682→   682→   682→  isActive    Boolean  @default(true)
+   683→   683→   683→  isSystem    Boolean  @default(false)
+   684→   684→   684→  createdAt   DateTime @default(now())
+   685→   685→   685→
+   686→   686→   686→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   687→   687→   687→  journalLines JournalLine[]
+   688→   688→   688→
+   689→   689→   689→  @@unique([tenantId, code])
+   690→   690→   690→  @@index([tenantId, type])
+   691→   691→   691→}
+   692→   692→   692→
+   693→   693→   693→// ============ Accounting: Journal Entries (double-entry) ============
+   694→   694→   694→model JournalEntry {
+   695→   695→   695→  id          String   @id @default(cuid())
+   696→   696→   696→  tenantId    String
+   697→   697→   697→  entryNumber String   // e.g. "JE-1001"
+   698→   698→   698→  date        DateTime @default(now())
+   699→   699→   699→  description String
+   700→   700→   700→  refType     String?  // sales_order | purchase_order | payment | expense | manual
+   701→   701→   701→  refId       String?
+   702→   702→   702→  status      String   @default("posted") // draft | posted | void
+   703→   703→   703→  createdAt   DateTime @default(now())
+   704→   704→   704→
+   705→   705→   705→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   706→   706→   706→  lines       JournalLine[]
+   707→   707→   707→
+   708→   708→   708→  @@unique([tenantId, entryNumber])
+   709→   709→   709→  @@index([tenantId, date])
+   710→   710→   710→}
+   711→   711→   711→
+   712→   712→   712→model JournalLine {
+   713→   713→   713→  id          String   @id @default(cuid())
+   714→   714→   714→  entryId     String
+   715→   715→   715→  accountId   String
+   716→   716→   716→  debit       Float    @default(0)
+   717→   717→   717→  credit      Float    @default(0)
+   718→   718→   718→  description String?
+   719→   719→   719→
+   720→   720→   720→  entry       JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+   721→   721→   721→  account     Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+   722→   722→   722→
+   723→   723→   723→  @@index([entryId])
+   724→   724→   724→  @@index([accountId])
+   725→   725→   725→}
+   726→   726→   726→
+   727→   727→   727→// ============ DuitNow QR Payment Settings ============
+   728→   728→   728→model DuitNowSettings {
+   729→   729→   729→  id              String   @id @default(cuid())
+   730→   730→   730→  tenantId        String   @unique
+   731→   731→   731→  merchantId      String?
+   732→   732→   732→  apiKey          String?
+   733→   733→   733→  apiSecret       String?
+   734→   734→   734→  isLive          Boolean  @default(false)
+   735→   735→   735→  webhookUrl      String?
+   736→   736→   736→  displayName     String   @default("Pay with DuitNow QR")
+   737→   737→   737→  isActive        Boolean  @default(true)
+   738→   738→   738→  createdAt       DateTime @default(now())
+   739→   739→   739→  updatedAt       DateTime @updatedAt
+   740→   740→   740→
+   741→   741→   741→  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   742→   742→   742→}
+   743→   743→   743→
+   744→   744→   744→// ============ Multi-Currency ============
+   745→   745→   745→model Currency {
+   746→   746→   746→  id          String   @id @default(cuid())
+   747→   747→   747→  tenantId    String
+   748→   748→   748→  code        String   // USD, EUR, GBP, MYR, etc.
+   749→   749→   749→  name        String
+   750→   750→   750→  symbol      String
+   751→   751→   751→  isBase      Boolean  @default(false) // the tenant's base currency
+   752→   752→   752→  isActive    Boolean  @default(true)
+   753→   753→   753→  createdAt   DateTime @default(now())
+   754→   754→   754→
+   755→   755→   755→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   756→   756→   756→  exchangeRates ExchangeRate[]
+   757→   757→   757→
+   758→   758→   758→  @@unique([tenantId, code])
+   759→   759→   759→}
+   760→   760→   760→
+   761→   761→   761→model ExchangeRate {
+   762→   762→   762→  id          String   @id @default(cuid())
+   763→   763→   763→  tenantId    String
+   764→   764→   764→  currencyId  String
+   765→   765→   765→  rate        Float    // rate relative to base currency (e.g. 1 USD = 4.5 MYR → rate = 4.5)
+   766→   766→   766→  date        DateTime @default(now())
+   767→   767→   767→  createdAt   DateTime @default(now())
+   768→   768→   768→
+   769→   769→   769→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   770→   770→   770→  currency    Currency @relation(fields: [currencyId], references: [id], onDelete: Cascade)
+   771→   771→   771→
+   772→   772→   772→  @@index([tenantId, currencyId, date])
+   773→   773→   773→}
+   774→   774→   774→
+   775→   775→   775→// ============ Workflow Builder ============
+   776→   776→   776→model Workflow {
+   777→   777→   777→  id          String   @id @default(cuid())
+   778→   778→   778→  tenantId    String
+   779→   779→   779→  name        String
+   780→   780→   780→  description String?
+   781→   781→   781→  trigger     String   // order.created | order.delivered | low_stock | payment.received | po.received | manual
+   782→   782→   782→  isActive    Boolean  @default(true)
+   783→   783→   783→  steps       WorkflowStep[]
+   784→   784→   784→  executions  WorkflowExecution[]
+   785→   785→   785→  createdAt   DateTime @default(now())
+   786→   786→   786→  updatedAt   DateTime @updatedAt
+   787→   787→   787→
+   788→   788→   788→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   789→   789→   789→
+   790→   790→   790→  @@index([tenantId, trigger])
+   791→   791→   791→}
+   792→   792→   792→
+   793→   793→   793→model WorkflowStep {
+   794→   794→   794→  id          String   @id @default(cuid())
+   795→   795→   795→  workflowId  String
+   796→   796→   796→  order       Int      // execution order (1, 2, 3...)
+   797→   797→   797→  type        String   // send_email | send_notification | create_task | update_status | call_webhook | wait | assign_user
+   798→   798→   798→  config      String   // JSON config for this step
+   799→   799→   799→  createdAt   DateTime @default(now())
+   800→   800→   800→
+   801→   801→   801→  workflow    Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+   802→   802→   802→}
+   803→   803→   803→
+   804→   804→   804→model WorkflowExecution {
+   805→   805→   805→  id          String   @id @default(cuid())
+   806→   806→   806→  tenantId    String
+   807→   807→   807→  workflowId  String
+   808→   808→   808→  trigger     String
+   809→   809→   809→  entityType  String?  // order | product | payment | etc.
+   810→   810→   810→  entityId    String?
+   811→   811→   811→  status      String   @default("pending") // pending | running | completed | failed
+   812→   812→   812→  stepsTotal  Int      @default(0)
+   813→   813→   813→  stepsDone   Int      @default(0)
+   814→   814→   814→  result      String?  // JSON result
+   815→   815→   815→  error       String?
+   816→   816→   816→  startedAt   DateTime?
+   817→   817→   817→  completedAt DateTime?
+   818→   818→   818→  createdAt   DateTime @default(now())
+   819→   819→   819→
+   820→   820→   820→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   821→   821→   821→  workflow    Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+   822→   822→   822→
+   823→   823→   823→  @@index([tenantId, createdAt])
+   824→   824→   824→}
+   825→   825→   825→
+   826→   826→   826→// ============ Custom Fields (no-code customization) ============
+   827→   827→   827→model CustomField {
+   828→   828→   828→  id          String   @id @default(cuid())
+   829→   829→   829→  tenantId    String
+   830→   830→   830→  module      String
+   831→   831→   831→  fieldKey    String
+   832→   832→   832→  label       String
+   833→   833→   833→  type        String   // text | number | date | select | textarea | checkbox | url | email | phone | formula | calculated
+   834→   834→   834→  options     String?
+   835→   835→   835→  defaultValue String?
+   836→   836→   836→  formula     String?
+   837→   837→   837→  formulaType String?
+   838→   838→   838→  sourceField String?
+   839→   839→   839→  isRequired  Boolean  @default(false)
+   840→   840→   840→  isFilterable Boolean  @default(false)
+   841→   841→   841→  showInTable  Boolean  @default(true)
+   842→   842→   842→  showInForm   Boolean  @default(true)
+   843→   843→   843→  sortOrder   Int      @default(0)
+   844→   844→   844→  isActive    Boolean  @default(true)
+   845→   845→   845→  createdAt   DateTime @default(now())
+   846→   846→   846→
+   847→   847→   847→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   848→   848→   848→  values      CustomFieldValue[]
+   849→   849→   849→
+   850→   850→   850→  @@unique([tenantId, module, fieldKey])
+   851→   851→   851→  @@index([tenantId, module])
+   852→   852→   852→}
+   853→   853→   853→
+   854→   854→   854→model CustomFieldValue {
+   855→   855→   855→  id          String   @id @default(cuid())
+   856→   856→   856→  tenantId    String
+   857→   857→   857→  customFieldId String
+   858→   858→   858→  entityType  String
+   859→   859→   859→  entityId    String
+   860→   860→   860→  value       String
+   861→   861→   861→  createdAt   DateTime @default(now())
+   862→   862→   862→
+   863→   863→   863→  customField CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+   864→   864→   864→
+   865→   865→   865→  @@unique([customFieldId, entityId])
+   866→   866→   866→  @@index([tenantId, entityType, entityId])
+   867→   867→   867→}
+   868→   868→   868→
+   869→   869→   869→model CustomTab {
+   870→   870→   870→  id          String   @id @default(cuid())
+   871→   871→   871→  tenantId    String
+   872→   872→   872→  module      String
+   873→   873→   873→  label       String
+   874→   874→   874→  content     String?
+   875→   875→   875→  sortOrder   Int      @default(0)
+   876→   876→   876→  isActive    Boolean  @default(true)
+   877→   877→   877→  createdAt   DateTime @default(now())
+   878→   878→   878→
+   879→   879→   879→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   880→   880→   880→}
+   881→   881→   881→
+   882→   882→   882→model StatusPipeline {
+   883→   883→   883→  id          String   @id @default(cuid())
+   884→   884→   884→  tenantId    String   @unique
+   885→   885→   885→  orderStatuses String @default("[]")
+   886→   886→   886→  poStatuses    String @default("[]")
+   887→   887→   887→  customerStatuses String @default("[]")
+   888→   888→   888→  employeeStatuses String @default("[]")
+   889→   889→   889→  createdAt   DateTime @default(now())
+   890→   890→   890→  updatedAt   DateTime @updatedAt
+   891→   891→   891→
+   892→   892→   892→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   893→   893→   893→}
+   894→   894→   894→
+   895→   895→   895→model RecordNote {
+   896→   896→   896→  id          String   @id @default(cuid())
+   897→   897→   897→  tenantId    String
+   898→   898→   898→  entityType  String
+   899→   899→   899→  entityId    String
+   900→   900→   900→  authorId    String?
+   901→   901→   901→  authorName  String
+   902→   902→   902→  content     String
+   903→   903→   903→  createdAt   DateTime @default(now())
+   904→   904→   904→
+   905→   905→   905→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   906→   906→   906→
+   907→   907→   907→  @@index([tenantId, entityType, entityId])
+   908→   908→   908→}
+   909→   909→   909→
+   910→   910→   910→model ModuleLabel {
+   911→   911→   911→  id          String   @id @default(cuid())
+   912→   912→   912→  tenantId    String
+   913→   913→   913→  moduleKey   String
+   914→   914→   914→  label       String
+   915→   915→   915→  description String?
+   916→   916→   916→  createdAt   DateTime @default(now())
+   917→   917→   917→
+   918→   918→   918→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   919→   919→   919→
+   920→   920→   920→  @@unique([tenantId, moduleKey])
+   921→   921→   921→}
+   922→   922→   922→
+   923→   923→   923→model FileAttachment {
+   924→   924→   924→  id          String   @id @default(cuid())
+   925→   925→   925→  tenantId    String
+   926→   926→   926→  entityType  String
+   927→   927→   927→  entityId    String
+   928→   928→   928→  fileName    String
+   929→   929→   929→  fileSize    Int
+   930→   930→   930→  mimeType    String
+   931→   931→   931→  base64Data  String
+   932→   932→   932→  uploadedBy  String?
+   933→   933→   933→  createdAt   DateTime @default(now())
+   934→   934→   934→
+   935→   935→   935→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   936→   936→   936→
+   937→   937→   937→  @@index([tenantId, entityType, entityId])
+   938→   938→   938→}
+   939→   939→   939→
+   940→   940→   940→// ============ Customizable Invoice Template ============
+   941→   941→   941→model InvoiceTemplate {
+   942→   942→   942→  id              String   @id @default(cuid())
+   943→   943→   943→  tenantId        String   @unique
+   944→   944→   944→  clinicName      String   @default("")
+   945→   945→   945→  clinicPhone     String   @default("")
+   946→   946→   946→  clinicAddress   String?  @default("")
+   947→   947→   947→  invoiceLabel    String   @default("INVOICE")
+   948→   948→   948→  showPatientIC   Boolean  @default(false)
+   949→   949→   949→  patientICLabel  String   @default("IC/Passport")
+   950→   950→   950→  showClinicalNotes Boolean @default(false)
+   951→   951→   951→  notesLabel      String   @default("Note")
+   952→   952→   952→  issueLabel      String   @default("Issue")
+   953→   953→   953→  findingsLabel   String   @default("Findings")
+   954→   954→   954→  diagnosisLabel  String   @default("Diagnosis")
+   955→   955→   955→  planLabel       String   @default("Plan")
+   956→   956→   956→  showItemNumber  Boolean  @default(true)
+   957→   957→   957→  itemColLabel    String   @default("Item")
+   958→   958→   958→  priceColLabel   String   @default("Price")
+   959→   959→   959→  unitColLabel    String   @default("Qty")
+   960→   960→   960→  amountColLabel  String   @default("Amount")
+   961→   961→   961→  totalLabel      String   @default("TOTAL TO PAY")
+   962→   962→   962→  currencySymbol  String   @default("RM")
+   963→   963→   963→  showPaymentQR   Boolean  @default(true)
+   964→   964→   964→  paymentInstructions String? @default("Scan to pay with DuitNow / TNG / Boost / all bank apps")
+   965→   965→   965→  footerText      String?  @default("Thank you for choosing us")
+   966→   966→   966→  primaryColor    String   @default("#263373")
+   967→   967→   967→  fontSize        String   @default("12px")
+   968→   968→   968→  patientCustomFields String? @default("[]")
+   969→   969→   969→  createdAt       DateTime @default(now())
+   970→   970→   970→  updatedAt       DateTime @updatedAt
+   971→   971→   971→
+   972→   972→   972→  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   973→   973→   973→}
+   974→   974→   974→
+   975→   975→   975→// ============ Service Encounter (generic, tenant-customizable) ============
+   976→   976→   976→model ClinicalEncounter {
+   977→   977→   977→  id              String   @id @default(cuid())
+   978→   978→   978→  tenantId        String
+   979→   979→   979→  orderId         String   @unique
+   980→   980→   980→  patientId       String
+   981→   981→   981→  doctorId        String?
+   982→   982→   982→  doctorName      String?
+   983→   983→   983→  data            String   @default("{}")
+   984→   984→   984→  advice          String?
+   985→   985→   985→  followUpDate    DateTime?
+   986→   986→   986→  followUpNotes   String?
+   987→   987→   987→  createdAt       DateTime @default(now())
+   988→   988→   988→  updatedAt       DateTime @updatedAt
+   989→   989→   989→
+   990→   990→   990→  tenant          Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+   991→   991→   991→  order           SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+   992→   992→   992→  patient         Customer   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+   993→   993→   993→}
+   994→   994→   994→
+   995→   995→   995→// ============ Encounter Template (tenant-customizable service form) ============
+   996→   996→   996→model EncounterTemplate {
+   997→   997→   997→  id              String   @id @default(cuid())
+   998→   998→   998→  tenantId        String   @unique
+   999→   999→   999→  displayName     String   @default("Service Form")
+  1000→  1000→  1000→  sections        String   @default("[]")
+  1001→  1001→  1001→  itemTables      String   @default("[]")
+  1002→  1002→  1002→  showAdvice      Boolean  @default(true)
+  1003→  1003→  1003→  adviceLabel     String   @default("Advice / Notes")
+  1004→  1004→  1004→  showFollowUp    Boolean  @default(true)
+  1005→  1005→  1005→  followUpLabel   String   @default("Follow-up")
+  1006→  1006→  1006→  showOnInvoice   Boolean  @default(true)
+  1007→  1007→  1007→  requireEncounterBeforeInvoice Boolean @default(false)
+  1008→  1008→  1008→  requiredSectionIds String?  @default("[]")
+  1009→  1009→  1009→  defaultDepositAmount Float?
+  1010→  1010→  1010→  defaultDepositLabel  String?  @default("Deposit")
+  1011→  1011→  1011→  createdAt       DateTime @default(now())
+  1012→  1012→  1012→  updatedAt       DateTime @updatedAt
+  1013→  1013→  1013→
+  1014→  1014→  1014→  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  1015→  1015→  1015→}
+  1016→  1016→  1016→
+  1017→  1017→  1017→// ============ Document Templates (multi-type) ============
+  1018→  1018→  1018→model DocumentTemplate {
+  1019→  1019→  1019→  id          String   @id @default(cuid())
+  1020→  1020→  1020→  tenantId    String
+  1021→  1021→  1021→  docType     String   // invoice | quotation | receipt | purchase_order | delivery_note | statement | credit_note
+  1022→  1022→  1022→  config      String   @default("{}")
+  1023→  1023→  1023→  isActive    Boolean  @default(true)
+  1024→  1024→  1024→  createdAt   DateTime @default(now())
+  1025→  1025→  1025→  updatedAt   DateTime @updatedAt
+  1026→  1026→  1026→
+  1027→  1027→  1027→  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  1028→  1028→  1028→
+  1029→  1029→  1029→  @@unique([tenantId, docType])
+  1030→  1030→  1030→  @@index([tenantId])
+  1031→  1031→  1031→}

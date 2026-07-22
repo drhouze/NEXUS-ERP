@@ -1,0 +1,714 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useMemo, useState } from 'react'
+     4→import { Card } from '@/components/ui/card'
+     5→import { KpiCard, SectionCard, StatusBadge } from './shared'
+     6→import { formatCurrency, formatNumber, formatDate } from './lib'
+     7→import { Input } from '@/components/ui/input'
+     8→import { Label } from '@/components/ui/label'
+     9→import { Button } from '@/components/ui/button'
+    10→import { Badge } from '@/components/ui/badge'
+    11→import { Alert, AlertDescription } from '@/components/ui/alert'
+    12→import {
+    13→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+    14→} from '@/components/ui/dialog'
+    15→import {
+    16→  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+    17→} from '@/components/ui/dropdown-menu'
+    18→import {
+    19→  DollarSign, ShoppingCart, TrendingUp, Clock, Search, Package, Plus, MoreVertical,
+    20→  ChevronRight, X, Copy, CreditCard, CheckCircle2, Loader2, FileText, Stethoscope,
+    21→  RotateCcw, AlertTriangle, MoreHorizontal,
+    22→} from 'lucide-react'
+    23→import { SalesOrderForm } from './forms'
+    24→import { EditDialog, EditField } from './edit-dialog'
+    25→import { EncounterDialog } from './encounter-dialog'
+    26→import {
+    27→  Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+    28→} from 'recharts'
+    29→
+    30→interface EncounterTemplateShape {
+    31→  displayName?: string
+    32→  sections?: any[]
+    33→  itemTables?: any[]
+    34→  requiredSectionIds?: string[]
+    35→  requireEncounterBeforeInvoice?: boolean
+    36→  defaultDepositAmount?: number | null
+    37→  defaultDepositLabel?: string
+    38→}
+    39→
+    40→interface OrdersData {
+    41→  orders: any[]
+    42→  statusCounts: { status: string; _count: number; _sum: { total: number | null } }[]
+    43→  summary: {
+    44→    total: number; totalRevenue: number; avgOrderValue: number;
+    45→    pending: number; processing: number; shipped: number; delivered: number; cancelled: number;
+    46→  }
+    47→  encounterTemplate?: EncounterTemplateShape | null
+    48→}
+    49→
+    50→const DEFAULT_PIPELINE = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+    51→
+    52→function parseArr<T = any>(v: any): T[] {
+    53→  if (!v) return []
+    54→  if (Array.isArray(v)) return v
+    55→  try {
+    56→    const p = JSON.parse(v)
+    57→    return Array.isArray(p) ? p : []
+    58→  } catch { return [] }
+    59→}
+    60→
+    61→function parseObj(v: any): any {
+    62→  if (!v) return {}
+    63→  if (typeof v === 'object') return v
+    64→  try { return JSON.parse(v) } catch { return {} }
+    65→}
+    66→
+    67→export function OrdersModule({ userRole = 'TENANT_ADMIN' }: { userRole?: string }) {
+    68→  const [data, setData] = useState<OrdersData | null>(null)
+    69→  const [search, setSearch] = useState('')
+    70→  const [status, setStatus] = useState('all')
+    71→  const [showForm, setShowForm] = useState(false)
+    72→  // Tenant's custom order status pipeline (loaded from /api/erp/status-pipelines).
+    73→  const [customStatuses, setCustomStatuses] = useState<string[]>(DEFAULT_PIPELINE)
+    74→
+    75→  const canAdd = true
+    76→  const canChangeStatus = userRole !== 'EMPLOYEE'
+    77→
+    78→  const loadData = () => fetch('/api/erp/orders').then(r => r.json()).then(setData)
+    79→  useEffect(() => { loadData() }, [])
+    80→
+    81→  // Fetch custom status pipeline
+    82→  useEffect(() => {
+    83→    fetch('/api/erp/status-pipelines')
+    84→      .then(r => (r.ok ? r.json() : null))
+    85→      .then(d => {
+    86→        if (d?.pipeline?.orderStatuses?.length) {
+    87→          // API returns [{value, label, color}], we need just the values
+    88→          const vals = d.pipeline.orderStatuses.map((s: any) => typeof s === 'string' ? s : s.value)
+    89→          setCustomStatuses(vals.length > 0 ? vals : DEFAULT_PIPELINE)
+    90→        }
+    91→      })
+    92→      .catch(() => {})
+    93→  }, [])
+    94→
+    95→  // ---- Helpers operating on the loaded encounter template ----
+    96→  const encounterTemplate = data?.encounterTemplate
+    97→
+    98→  /** Returns true when the tenant has configured any sections or item tables. */
+    99→  function hasServiceFormConfigured(): boolean {
+   100→    if (!encounterTemplate) return false
+   101→    const sections = parseArr(encounterTemplate.sections)
+   102→    const tables = parseArr(encounterTemplate.itemTables)
+   103→    return sections.length > 0 || tables.length > 0
+   104→  }
+   105→
+   106→  /** Last non-cancelled status from customStatuses (= "Completed"). */
+   107→  function getTerminalStatus(): string | null {
+   108→    for (let i = customStatuses.length - 1; i >= 0; i--) {
+   109→      if (customStatuses[i] !== 'cancelled') return customStatuses[i]
+   110→    }
+   111→    return customStatuses[customStatuses.length - 1] || null
+   112→  }
+   113→
+   114→  /**
+   115→   * Encounter gate. Returns {ok:true} when the order can advance to the
+   116→   * terminal status (or be invoiced). Otherwise returns {ok:false, reason}.
+   117→   */
+   118→  function checkEncounterGate(order: any): { ok: boolean; reason?: string } {
+   119→    if (!encounterTemplate?.requireEncounterBeforeInvoice) return { ok: true }
+   120→    if (!order.encounter) {
+   121→      return { ok: false, reason: 'A service form / encounter is required before invoicing.' }
+   122→    }
+   123→    const requiredIds = parseArr<string>(encounterTemplate.requiredSectionIds)
+   124→    if (requiredIds.length > 0) {
+   125→      const data = parseObj(order.encounter.data)
+   126→      const sectionValues: Record<string, any> = data.sectionValues || {}
+   127→      const missing = requiredIds.filter(sid => !sectionValues[sid] && sectionValues[sid] !== 0)
+   128→      if (missing.length > 0) {
+   129→        return { ok: false, reason: `Required service form sections are missing: ${missing.join(', ')}` }
+   130→      }
+   131→    }
+   132→    return { ok: true }
+   133→  }
+   134→
+   135→  async function changeStatus(orderId: string, newStatus: string) {
+   136→    const order = data?.orders.find(o => o.id === orderId)
+   137→    if (order) {
+   138→      const terminal = getTerminalStatus()
+   139→      if (terminal && newStatus === terminal) {
+   140→        const gate = checkEncounterGate(order)
+   141→        if (!gate.ok) {
+   142→          alert(gate.reason || 'This action is blocked by the encounter gate.')
+   143→          return
+   144→        }
+   145→      }
+   146→    }
+   147→    const res = await fetch(`/api/erp/orders/${orderId}/status`, {
+   148→      method: 'PATCH',
+   149→      headers: { 'Content-Type': 'application/json' },
+   150→      body: JSON.stringify({ status: newStatus }),
+   151→    })
+   152→    if (res.ok) loadData()
+   153→  }
+   154→
+   155→  async function duplicateOrder(orderId: string) {
+   156→    if (!confirm('Duplicate this order? A new order with the same line items will be created with status "pending".')) return
+   157→    const res = await fetch(`/api/erp/orders/${orderId}/duplicate`, { method: 'POST' })
+   158→    if (res.ok) loadData()
+   159→  }
+   160→
+   161→  // ---- Payment dialog state ----
+   162→  const [paymentOrder, setPaymentOrder] = useState<any>(null)
+   163→  const [payments, setPayments] = useState<any[]>([])
+   164→  const [paymentAmount, setPaymentAmount] = useState('')
+   165→  const [paymentMethod, setPaymentMethod] = useState('cash')
+   166→  const [paymentRef, setPaymentRef] = useState('')
+   167→  const [paymentLoading, setPaymentLoading] = useState(false)
+   168→  const [paymentError, setPaymentError] = useState('')
+   169→
+   170→  // ---- EditDialog + EncounterDialog state (declared before any early return) ----
+   171→  const [editingOrder, setEditingOrder] = useState<any>(null)
+   172→  const [encounterOrder, setEncounterOrder] = useState<any>(null)
+   173→
+   174→  async function openPaymentDialog(order: any, opts?: { method?: string; amount?: string }) {
+   175→    setPaymentOrder(order)
+   176→    setPaymentError('')
+   177→    setPaymentMethod(opts?.method || 'cash')
+   178→    setPaymentRef('')
+   179→    const res = await fetch(`/api/erp/orders/${order.id}/payments`)
+   180→    if (res.ok) {
+   181→      const d = await res.json()
+   182→      setPayments(d.payments || [])
+   183→      if (opts?.amount) {
+   184→        setPaymentAmount(opts.amount)
+   185→      } else {
+   186→        const balance = d.balance
+   187→        setPaymentAmount(balance > 0 ? balance.toFixed(2) : '0.00')
+   188→      }
+   189→    }
+   190→  }
+   191→
+   192→  async function submitPayment() {
+   193→    if (!paymentOrder) return
+   194→    setPaymentLoading(true); setPaymentError('')
+   195→    try {
+   196→      const res = await fetch(`/api/erp/orders/${paymentOrder.id}/payments`, {
+   197→        method: 'POST',
+   198→        headers: { 'Content-Type': 'application/json' },
+   199→        body: JSON.stringify({ amount: paymentAmount, method: paymentMethod, reference: paymentRef }),
+   200→      })
+   201→      const d = await res.json()
+   202→      if (!res.ok) throw new Error(d.error)
+   203→      setPaymentOrder(null)
+   204→      loadData()
+   205→    } catch (e: any) { setPaymentError(e.message) } finally { setPaymentLoading(false) }
+   206→  }
+   207→
+   208→  /** Open the payment dialog pre-filled for a refund of the surplus amount. */
+   209→  function refundSurplus(order: any) {
+   210→    const surplus = (order.paidAmount || 0) - order.total
+   211→    if (surplus <= 0.01) return
+   212→    openPaymentDialog(order, { method: 'refund', amount: surplus.toFixed(2) })
+   213→  }
+   214→
+   215→  function getPaymentStatus(order: any): { label: string; color: string } {
+   216→    if (!order.paidAmount || order.paidAmount === 0) return { label: 'Unpaid', color: 'bg-rose-100 text-rose-700' }
+   217→    if (order.paidAmount >= order.total - 0.01) {
+   218→      // Distinguish "Paid" from "Overpaid".
+   219→      if (order.paidAmount > order.total + 0.01) return { label: 'Surplus', color: 'bg-amber-100 text-amber-700' }
+   220→      return { label: 'Paid', color: 'bg-emerald-100 text-emerald-700' }
+   221→    }
+   222→    return { label: 'Partial', color: 'bg-amber-100 text-amber-700' }
+   223→  }
+   224→
+   225→  const filtered = useMemo(() => {
+   226→    if (!data) return []
+   227→    return data.orders.filter(o =>
+   228→      (o.orderNumber.toLowerCase().includes(search.toLowerCase()) ||
+   229→       o.customer.company.toLowerCase().includes(search.toLowerCase())) &&
+   230→      (status === 'all' || o.status === status)
+   231→    )
+   232→  }, [data, search, status])
+   233→
+   234→  if (!data) return <div className="grid grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Card key={i} className="h-32 animate-pulse bg-muted/40" />)}</div>
+   235→
+   236→  const pipeline = customStatuses.map(s => ({
+   237→    status: s,
+   238→    count: data.statusCounts.find(x => x.status === s)?._count || 0,
+   239→    total: data.statusCounts.find(x => x.status === s)?._sum.total || 0,
+   240→  }))
+   241→
+   242→  const terminalStatus = getTerminalStatus()
+   243→
+   244→  // ---- EditDialog field config ----
+   245→  const editFields: EditField[] = [
+   246→    { key: 'status', label: 'Status', type: 'select', options: customStatuses, required: true, halfWidth: true },
+   247→    { key: 'discountType', label: 'Discount Type', type: 'select', options: ['__none__', 'percentage', 'fixed'], halfWidth: true },
+   248→    { key: 'discountValue', label: 'Discount Value (% or amount)', type: 'number', halfWidth: true },
+   249→    { key: 'taxRate', label: 'Tax Rate (%)', type: 'number', halfWidth: true },
+   250→    { key: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Optional internal notes' },
+   251→  ]
+   252→
+   253→  return (
+   254→    <div className="space-y-6">
+   255→      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   256→        <KpiCard label="Total Orders" value={formatNumber(data.summary.total)} icon={ShoppingCart} accent="indigo" />
+   257→        <KpiCard label="Revenue (Booked)" value={formatCurrency(data.summary.totalRevenue, { compact: true })} icon={DollarSign} accent="emerald" hint="Shipped + delivered" />
+   258→        <KpiCard label="Avg Order Value" value={formatCurrency(data.summary.avgOrderValue)} icon={TrendingUp} accent="purple" />
+   259→        <KpiCard label="Pending" value={formatNumber(data.summary.pending + data.summary.processing)} icon={Clock} accent="amber" hint="Needs action" />
+   260→      </div>
+   261→
+   262→      {/* Pipeline */}
+   263→      <Card className="p-0 overflow-hidden">
+   264→        <div className="px-5 py-4 border-b border-border/60">
+   265→          <h3 className="font-semibold">Order Pipeline</h3>
+   266→          <p className="text-xs text-muted-foreground mt-0.5">Orders grouped by status</p>
+   267→        </div>
+   268→        <div className="grid grid-cols-2 md:grid-cols-5 divide-x divide-border/60">
+   269→          {pipeline.map(p => (
+   270→            <div key={p.status} className="p-5">
+   271→              <div className="flex items-center justify-between mb-1">
+   272→                <StatusBadge status={p.status} />
+   273→                <span className="text-2xl font-bold tabular-nums">{p.count}</span>
+   274→              </div>
+   275→              <p className="text-xs text-muted-foreground mt-1">{formatCurrency(p.total, { compact: true })} total</p>
+   276→            </div>
+   277→          ))}
+   278→        </div>
+   279→      </Card>
+   280→
+   281→      {/* Status bar chart */}
+   282→      <Card className="p-0 overflow-hidden">
+   283→        <div className="px-5 py-4 border-b border-border/60">
+   284→          <h3 className="font-semibold">Revenue by Status</h3>
+   285→          <p className="text-xs text-muted-foreground mt-0.5">Where revenue is concentrated</p>
+   286→        </div>
+   287→        <div className="p-4 h-[260px]">
+   288→          <ResponsiveContainer width="100%" height="100%">
+   289→            <BarChart data={pipeline.map(p => ({ name: p.status, revenue: p.total, orders: p.count }))}>
+   290→              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+   291→              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} />
+   292→              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `${v / 1000}k`} />
+   293→              <Tooltip
+   294→                contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+   295→                formatter={(value: any) => [formatCurrency(value), 'Revenue']}
+   296→              />
+   297→              <Bar dataKey="revenue" fill="#6366f1" radius={[4, 4, 0, 0]} />
+   298→            </BarChart>
+   299→          </ResponsiveContainer>
+   300→        </div>
+   301→      </Card>
+   302→
+   303→      {/* Orders table */}
+   304→      <SectionCard
+   305→        title="All Orders"
+   306→        subtitle={`${filtered.length} of ${data.orders.length} orders`}
+   307→        action={canAdd && <Button size="sm" onClick={() => setShowForm(true)}><Plus className="h-4 w-4 mr-2" /> New Order</Button>}
+   308→      >
+   309→        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+   310→          <div className="relative flex-1">
+   311→            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   312→            <Input
+   313→              placeholder="Search by order # or customer..."
+   314→              value={search}
+   315→              onChange={(e) => setSearch(e.target.value)}
+   316→              className="pl-9"
+   317→            />
+   318→          </div>
+   319→          <select
+   320→            className="w-full sm:w-40 rounded-md border border-input bg-background px-3 py-2 text-sm"
+   321→            value={status}
+   322→            onChange={e => setStatus(e.target.value)}
+   323→          >
+   324→            <option value="all">All Statuses</option>
+   325→            {customStatuses.map(s => (
+   326→              <option key={s} value={s}>{s.replace(/\b\w/g, c => c.toUpperCase())}</option>
+   327→            ))}
+   328→          </select>
+   329→        </div>
+   330→
+   331→        <div className="overflow-x-auto -mx-5 px-5 max-h-[600px] overflow-y-auto">
+   332→          <table className="w-full text-sm">
+   333→            <thead className="sticky top-0 bg-background">
+   334→              <tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+   335→                <th className="pb-2 pr-4 font-medium">Order #</th>
+   336→                <th className="pb-2 pr-4 font-medium">Customer</th>
+   337→                <th className="pb-2 pr-4 font-medium">Items</th>
+   338→                <th className="pb-2 pr-4 font-medium">Status</th>
+   339→                <th className="pb-2 pr-4 font-medium">Payment</th>
+   340→                <th className="pb-2 pr-4 font-medium">Total</th>
+   341→                <th className="pb-2 pr-4 font-medium">Date</th>
+   342→                {canChangeStatus && <th className="pb-2 pr-4 font-medium text-right">Actions</th>}
+   343→              </tr>
+   344→            </thead>
+   345→            <tbody>
+   346→              {filtered.map((o) => {
+   347→                const payStatus = getPaymentStatus(o)
+   348→                const balance = o.total - (o.paidAmount || 0)
+   349→                const surplus = -balance // balance < 0 → surplus > 0
+   350→                const gate = checkEncounterGate(o)
+   351→                const isTerminal = terminalStatus && o.status === terminalStatus
+   352→                // Next status = pipeline entry after the current one (skipping cancelled).
+   353→                const curIdx = customStatuses.indexOf(o.status)
+   354→                const nextStatus = curIdx >= 0 && curIdx < customStatuses.length - 1 ? customStatuses[curIdx + 1] : null
+   355→                const canAdvance = !isTerminal && o.status !== 'cancelled' && !!nextStatus
+   356→                return (
+   357→                <tr key={o.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+   358→                  <td className="py-3 pr-4 font-mono text-xs">{o.orderNumber}</td>
+   359→                  <td className="py-3 pr-4">
+   360→                    <div className="font-medium">{o.customer.company}</div>
+   361→                    <div className="text-xs text-muted-foreground">{o.customer.name}</div>
+   362→                  </td>
+   363→                  <td className="py-3 pr-4">
+   364→                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+   365→                      <Package className="h-3 w-3" />
+   366→                      {o.items.length} item{o.items.length > 1 ? 's' : ''}
+   367→                    </div>
+   368→                  </td>
+   369→                  <td className="py-3 pr-4">
+   370→                    <StatusBadge status={o.status} />
+   371→                    {isTerminal && (
+   372→                      <div className="text-[10px] text-emerald-700 font-medium mt-0.5">Completed</div>
+   373→                    )}
+   374→                  </td>
+   375→                  <td className="py-3 pr-4">
+   376→                    <div className="flex flex-col gap-0.5">
+   377→                      <Badge className={payStatus.color + ' w-fit'}>{payStatus.label}</Badge>
+   378→                      {balance > 0.01 && (
+   379→                        <span className="text-[10px] text-rose-700">Bal: {formatCurrency(balance)}</span>
+   380→                      )}
+   381→                      {surplus > 0.01 && (
+   382→                        <span className="text-[10px] text-amber-700">Surplus: {formatCurrency(surplus)}</span>
+   383→                      )}
+   384→                    </div>
+   385→                  </td>
+   386→                  <td className="py-3 pr-4 font-medium tabular-nums">{formatCurrency(o.total)}</td>
+   387→                  <td className="py-3 pr-4 text-muted-foreground text-xs">{formatDate(o.createdAt)}</td>
+   388→                  {canChangeStatus && (
+   389→                    <td className="py-3 pr-4 text-right">
+   390→                      <div className="flex items-center justify-end gap-1 flex-wrap">
+   391→                        {/* Service form / encounter button (only if configured) */}
+   392→                        {hasServiceFormConfigured() && (
+   393→                          <Button
+   394→                            variant="ghost"
+   395→                            size="icon"
+   396→                            className={`h-7 w-7 ${!gate.ok ? 'animate-pulse text-amber-600' : 'text-muted-foreground'}`}
+   397→                            title={gate.ok ? 'Open service form' : 'Service form required — click to open'}
+   398→                            onClick={() => setEncounterOrder(o)}
+   399→                          >
+   400→                            <Stethoscope className="h-3.5 w-3.5" />
+   401→                          </Button>
+   402→                        )}
+   403→
+   404→                        {/* Payment button */}
+   405→                        {o.status !== 'cancelled' && balance > 0.01 && (
+   406→                          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openPaymentDialog(o)}>
+   407→                            <CreditCard className="h-3 w-3 mr-1" /> Payment
+   408→                          </Button>
+   409→                        )}
+   410→
+   411→                        {/* Refund surplus button */}
+   412→                        {surplus > 0.01 && (
+   413→                          <Button variant="outline" size="sm" className="h-7 text-xs text-amber-700" onClick={() => refundSurplus(o)}>
+   414→                            <RotateCcw className="h-3 w-3 mr-1" /> Refund
+   415→                          </Button>
+   416→                        )}
+   417→
+   418→                        {/* Invoice button (gated by encounter) */}
+   419→                        <a href={`/docs/invoice/${o.id}`} target="_blank" rel="noopener">
+   420→                          <Button
+   421→                            variant="ghost"
+   422→                            size="icon"
+   423→                            className={`h-7 w-7 ${!gate.ok ? 'text-amber-600' : ''}`}
+   424→                            title={gate.ok ? 'View / Print Invoice' : 'Invoice locked — service form required'}
+   425→                          >
+   426→                            <FileText className="h-3.5 w-3.5" />
+   427→                          </Button>
+   428→                        </a>
+   429→
+   430→                        {/* Other documents dropdown */}
+   431→                        <DropdownMenu>
+   432→                          <DropdownMenuTrigger asChild>
+   433→                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Other documents">
+   434→                              <MoreVertical className="h-3.5 w-3.5" />
+   435→                            </Button>
+   436→                          </DropdownMenuTrigger>
+   437→                          <DropdownMenuContent align="end">
+   438→                            <DropdownMenuItem asChild>
+   439→                              <a href={`/docs/quotation/${o.id}`} target="_blank" rel="noopener">View Quotation</a>
+   440→                            </DropdownMenuItem>
+   441→                            <DropdownMenuItem asChild>
+   442→                              <a href={`/docs/receipt/${o.id}`} target="_blank" rel="noopener">View Receipt</a>
+   443→                            </DropdownMenuItem>
+   444→                            <DropdownMenuItem asChild>
+   445→                              <a href={`/docs/delivery-note/${o.id}`} target="_blank" rel="noopener">View Delivery Note</a>
+   446→                            </DropdownMenuItem>
+   447→                            <DropdownMenuSeparator />
+   448→                            <DropdownMenuItem onClick={() => setEditingOrder(o)}>Edit Order…</DropdownMenuItem>
+   449→                            <DropdownMenuItem onClick={() => duplicateOrder(o.id)}>Duplicate Order</DropdownMenuItem>
+   450→                            {hasServiceFormConfigured() && (
+   451→                              <DropdownMenuItem onClick={() => setEncounterOrder(o)}>
+   452→                                <Stethoscope className="h-3 w-3 mr-2" /> Open Service Form
+   453→                              </DropdownMenuItem>
+   454→                            )}
+   455→                          </DropdownMenuContent>
+   456→                        </DropdownMenu>
+   457→
+   458→                        {/* Status dropdown — show "Completed" when terminal */}
+   459→                        {isTerminal ? (
+   460→                          <Badge className="bg-emerald-100 text-emerald-700 h-7 px-2 inline-flex items-center">Completed</Badge>
+   461→                        ) : canAdvance ? (
+   462→                          <DropdownMenu>
+   463→                            <DropdownMenuTrigger asChild>
+   464→                              <Button variant="ghost" size="sm" className="h-7 text-xs">
+   465→                                Advance <ChevronRight className="h-3 w-3 ml-1" />
+   466→                              </Button>
+   467→                            </DropdownMenuTrigger>
+   468→                            <DropdownMenuContent align="end">
+   469→                              <DropdownMenuItem onClick={() => changeStatus(o.id, nextStatus!)}>
+   470→                                → Mark as {nextStatus!.replace(/\b\w/g, c => c.toUpperCase())}
+   471→                              </DropdownMenuItem>
+   472→                              {!gate.ok && (
+   473→                                <div className="px-2 py-1 text-[10px] text-amber-700 flex items-start gap-1">
+   474→                                  <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+   475→                                  <span>{gate.reason}</span>
+   476→                                </div>
+   477→                              )}
+   478→                              <DropdownMenuSeparator />
+   479→                              <DropdownMenuItem className="text-rose-600" onClick={() => changeStatus(o.id, 'cancelled')}>
+   480→                                <X className="h-3 w-3 mr-2" /> Cancel Order
+   481→                              </DropdownMenuItem>
+   482→                            </DropdownMenuContent>
+   483→                          </DropdownMenu>
+   484→                        ) : null}
+   485→                      </div>
+   486→                    </td>
+   487→                  )}
+   488→                </tr>
+   489→                )
+   490→              })}
+   491→            </tbody>
+   492→          </table>
+   493→          {filtered.length === 0 && (
+   494→            <div className="text-center py-8 text-sm text-muted-foreground">No orders match your filters</div>
+   495→          )}
+   496→        </div>
+   497→      </SectionCard>
+   498→
+   499→      {/* Payment Dialog */}
+   500→      <Dialog open={!!paymentOrder} onOpenChange={(v) => !v && setPaymentOrder(null)}>
+   501→        <DialogContent>
+   502→          <DialogHeader>
+   503→            <DialogTitle className="flex items-center gap-2">
+   504→              {paymentMethod === 'refund' ? <RotateCcw className="h-5 w-5" /> : <CreditCard className="h-5 w-5" />}
+   505→              {paymentMethod === 'refund' ? 'Issue Refund' : 'Receive Payment'}
+   506→            </DialogTitle>
+   507→            <DialogDescription>
+   508→              {paymentOrder && (
+   509→                <>Order <strong>{paymentOrder.orderNumber}</strong> · {paymentOrder.customer?.company} · Total: <strong>{formatCurrency(paymentOrder.total)}</strong></>
+   510→              )}
+   511→            </DialogDescription>
+   512→          </DialogHeader>
+   513→          {paymentOrder && (() => {
+   514→            const balance = paymentOrder.total - (paymentOrder.paidAmount || 0)
+   515→            const surplus = -balance
+   516→            const isRefund = paymentMethod === 'refund'
+   517→            const isDeposit = paymentMethod === 'deposit'
+   518→            return (
+   519→              <div className="space-y-4">
+   520→                {/* 3-state balance display */}
+   521→                <div className="grid grid-cols-3 gap-3 p-3 rounded-lg bg-muted/40">
+   522→                  <div>
+   523→                    <p className="text-xs text-muted-foreground">Total</p>
+   524→                    <p className="font-semibold tabular-nums">{formatCurrency(paymentOrder.total)}</p>
+   525→                  </div>
+   526→                  <div>
+   527→                    <p className="text-xs text-muted-foreground">Paid</p>
+   528→                    <p className="font-semibold tabular-nums text-emerald-600">{formatCurrency(paymentOrder.paidAmount || 0)}</p>
+   529→                  </div>
+   530→                  {balance > 0.01 ? (
+   531→                    <div>
+   532→                      <p className="text-xs text-muted-foreground">Balance Due</p>
+   533→                      <p className="font-semibold tabular-nums text-rose-600">{formatCurrency(balance)}</p>
+   534→                    </div>
+   535→                  ) : surplus > 0.01 ? (
+   536→                    <div>
+   537→                      <p className="text-xs text-muted-foreground">Surplus</p>
+   538→                      <p className="font-semibold tabular-nums text-amber-600">{formatCurrency(surplus)}</p>
+   539→                    </div>
+   540→                  ) : (
+   541→                    <div>
+   542→                      <p className="text-xs text-muted-foreground">Status</p>
+   543→                      <p className="font-semibold tabular-nums text-emerald-600">Settled</p>
+   544→                    </div>
+   545→                  )}
+   546→                </div>
+   547→
+   548→                {/* Existing payments */}
+   549→                {payments.length > 0 && (
+   550→                  <div>
+   551→                    <p className="text-xs font-medium text-muted-foreground mb-1">Payment History</p>
+   552→                    <div className="space-y-1 max-h-[120px] overflow-y-auto">
+   553→                      {payments.map((p: any) => {
+   554→                        const isDepositPmt = p.method === 'deposit'
+   555→                        const isRefundPmt = p.method === 'refund'
+   556→                        const badgeColor = isRefundPmt
+   557→                          ? 'bg-rose-100 text-rose-700'
+   558→                          : isDepositPmt
+   559→                            ? 'bg-indigo-100 text-indigo-700'
+   560→                            : 'bg-slate-100 text-slate-700'
+   561→                        return (
+   562→                          <div key={p.id} className="flex items-center justify-between text-xs p-2 rounded border border-border/60">
+   563→                            <div>
+   564→                              <span className={`font-medium tabular-nums ${isRefundPmt ? 'text-rose-700' : isDepositPmt ? 'text-indigo-700' : 'text-foreground'}`}>
+   565→                                {isRefundPmt ? '-' : ''}{formatCurrency(Math.abs(p.amount))}
+   566→                              </span>
+   567→                              <Badge className={`ml-2 text-[10px] ${badgeColor}`}>{p.method}</Badge>
+   568→                              {p.reference && <span className="text-muted-foreground ml-2">Ref: {p.reference}</span>}
+   569→                            </div>
+   570→                            <span className="text-muted-foreground">{formatDate(p.createdAt)}</span>
+   571→                          </div>
+   572→                        )
+   573→                      })}
+   574→                    </div>
+   575→                  </div>
+   576→                )}
+   577→
+   578→                {/* New payment form */}
+   579→                <div className="grid grid-cols-2 gap-3">
+   580→                  <div className="space-y-1.5">
+   581→                    <Label className="text-xs">Amount *</Label>
+   582→                    <Input type="number" step="0.01" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+   583→                  </div>
+   584→                  <div className="space-y-1.5">
+   585→                    <Label className="text-xs">Method</Label>
+   586→                    <select
+   587→                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+   588→                      value={paymentMethod}
+   589→                      onChange={e => setPaymentMethod(e.target.value)}
+   590→                    >
+   591→                      <option value="cash">Cash</option>
+   592→                      <option value="card">Card</option>
+   593→                      <option value="bank_transfer">Bank Transfer</option>
+   594→                      <option value="check">Check</option>
+   595→                      <option value="tng">Touch 'n Go (TNG)</option>
+   596→                      <option value="duitnow">DuitNow QR</option>
+   597→                      <option value="deposit">Deposit (overpayment allowed)</option>
+   598→                      <option value="refund">Refund (returns money)</option>
+   599→                      <option value="other">Other</option>
+   600→                    </select>
+   601→                  </div>
+   602→                </div>
+   603→                <div className="space-y-1.5">
+   604→                  <Label className="text-xs">Reference (optional)</Label>
+   605→                  <Input value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="Check #, transaction ID, etc." />
+   606→                </div>
+   607→
+   608→                {/* Quick amount buttons */}
+   609→                <div className="flex flex-wrap gap-2">
+   610→                  {!isRefund && balance > 0.01 && (
+   611→                    <Button type="button" size="sm" variant="outline" onClick={() => setPaymentAmount(balance.toFixed(2))}>
+   612→                      Full Balance
+   613→                    </Button>
+   614→                  )}
+   615→                  {!isRefund && balance > 0.01 && (
+   616→                    <Button type="button" size="sm" variant="outline" onClick={() => setPaymentAmount((balance / 2).toFixed(2))}>
+   617→                      50%
+   618→                    </Button>
+   619→                  )}
+   620→                  {/* Quick deposit from template default */}
+   621→                  {!isRefund && encounterTemplate?.defaultDepositAmount != null && (
+   622→                    <Button
+   623→                      type="button"
+   624→                      size="sm"
+   625→                      variant="outline"
+   626→                      onClick={() => {
+   627→                        setPaymentMethod('deposit')
+   628→                        setPaymentAmount(String(encounterTemplate.defaultDepositAmount || 0))
+   629→                      }}
+   630→                    >
+   631→                      {encounterTemplate.defaultDepositLabel || 'Deposit'} ({formatCurrency(encounterTemplate.defaultDepositAmount || 0)})
+   632→                    </Button>
+   633→                  )}
+   634→                  {/* Quick refund of surplus */}
+   635→                  {surplus > 0.01 && (
+   636→                    <Button
+   637→                      type="button"
+   638→                      size="sm"
+   639→                      variant="outline"
+   640→                      className="text-amber-700"
+   641→                      onClick={() => {
+   642→                        setPaymentMethod('refund')
+   643→                        setPaymentAmount(surplus.toFixed(2))
+   644→                      }}
+   645→                    >
+   646→                      Refund Surplus ({formatCurrency(surplus)})
+   647→                    </Button>
+   648→                  )}
+   649→                  <Button type="button" size="sm" variant="outline" onClick={() => setPaymentAmount('')}>
+   650→                    Custom
+   651→                  </Button>
+   652→                </div>
+   653→
+   654→                {isRefund && (
+   655→                  <Alert className="border-amber-200 bg-amber-50">
+   656→                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+   657→                    <AlertDescription className="text-amber-800 text-xs">
+   658→                      Refunds are stored as negative payments and create an expense transaction. They reduce the order's paid total.
+   659→                    </AlertDescription>
+   660→                  </Alert>
+   661→                )}
+   662→
+   663→                {paymentError && <p className="text-sm text-rose-600">{paymentError}</p>}
+   664→              </div>
+   665→            )
+   666→          })()}
+   667→          <DialogFooter>
+   668→            <Button variant="outline" onClick={() => setPaymentOrder(null)}>Cancel</Button>
+   669→            <Button onClick={submitPayment} disabled={paymentLoading || !paymentAmount}>
+   670→              {paymentLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : paymentMethod === 'refund' ? <RotateCcw className="h-4 w-4 mr-2" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
+   671→              {paymentMethod === 'refund' ? 'Issue Refund' : 'Record Payment'}
+   672→            </Button>
+   673→          </DialogFooter>
+   674→        </DialogContent>
+   675→      </Dialog>
+   676→
+   677→      {/* Edit order dialog */}
+   678→      <EditDialog
+   679→        open={!!editingOrder}
+   680→        onOpenChange={v => !v && setEditingOrder(null)}
+   681→        title={`Edit Order ${editingOrder?.orderNumber || ''}`}
+   682→        description="Update order status and notes. Line items can be edited from the invoice view."
+   683→        fields={editFields}
+   684→        initialData={editingOrder ? { status: editingOrder.status, notes: '' } : {}}
+   685→        size="sm"
+   686→        submitLabel="Save Changes"
+   687→        onSubmit={async (formData) => {
+   688→          if (!editingOrder) return
+   689→          const res = await fetch(`/api/erp/orders/${editingOrder.id}/status`, {
+   690→            method: 'PATCH',
+   691→            headers: { 'Content-Type': 'application/json' },
+   692→            body: JSON.stringify({ status: formData.status }),
+   693→          })
+   694→          if (!res.ok) {
+   695→            const d = await res.json().catch(() => ({}))
+   696→            throw new Error(d.error || 'Failed to update order')
+   697→          }
+   698→          loadData()
+   699→        }}
+   700→      />
+   701→
+   702→      {/* Encounter dialog */}
+   703→      <EncounterDialog
+   704→        orderId={encounterOrder?.id || ''}
+   705→        open={!!encounterOrder}
+   706→        onOpenChange={v => !v && setEncounterOrder(null)}
+   707→        onSaved={() => loadData()}
+   708→      />
+   709→
+   710→      {canAdd && <SalesOrderForm open={showForm} onClose={() => setShowForm(false)} onCreated={loadData} />}
+   711→    </div>
+   712→  )
+   713→}
+   714→

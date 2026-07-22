@@ -1,0 +1,1030 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useState, useRef } from 'react'
+     4→import { Card } from '@/components/ui/card'
+     5→import { SectionCard } from './shared'
+     6→import { formatCurrency, formatDate, relativeTime } from './lib'
+     7→import { Button } from '@/components/ui/button'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Label } from '@/components/ui/label'
+    10→import { Badge } from '@/components/ui/badge'
+    11→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    12→import { Alert, AlertDescription } from '@/components/ui/alert'
+    13→import {
+    14→  Settings as SettingsIcon, Crown, Check, Download, Upload, Loader2, CheckCircle2,
+    15→  Building2, CreditCard, Database, Shield, KeyRound, AlertCircle, Webhook, Mail,
+    16→  Clock, Copy, Plus, Trash2, Power, Smartphone, Server, Globe,
+    17→} from 'lucide-react'
+    18→
+    19→interface TenantData {
+    20→  id: string
+    21→  name: string
+    22→  industry: string
+    23→  plan: string
+    24→  status: string
+    25→  seats: number
+    26→  createdAt: string
+    27→}
+    28→
+    29→export function SettingsModule({ userRole = 'TENANT_ADMIN' }: { userRole?: string }) {
+    30→  return (
+    31→    <div className="space-y-6">
+    32→      <Card className="p-0 overflow-hidden bg-gradient-to-r from-indigo-600 to-purple-700 text-white border-0">
+    33→        <div className="p-6">
+    34→          <div className="flex items-center gap-2 mb-1">
+    35→            <SettingsIcon className="h-5 w-5" />
+    36→            <span className="text-xs font-semibold uppercase tracking-wider opacity-90">Settings</span>
+    37→          </div>
+    38→          <h2 className="text-2xl font-bold">Tenant Configuration</h2>
+    39→          <p className="text-sm opacity-90 mt-1">Manage your subscription, security, integrations, and data retention.</p>
+    40→        </div>
+    41→      </Card>
+    42→
+    43→      <Tabs defaultValue="subscription">
+    44→        <TabsList className="flex-wrap h-auto">
+    45→          <TabsTrigger value="subscription">Subscription</TabsTrigger>
+    46→          <TabsTrigger value="numbering">Numbering</TabsTrigger>
+    47→          <TabsTrigger value="currencies">Currencies</TabsTrigger>
+    48→          <TabsTrigger value="duitnow">DuitNow QR</TabsTrigger>
+    49→          <TabsTrigger value="security">Security (2FA)</TabsTrigger>
+    50→          <TabsTrigger value="api-keys">API Keys</TabsTrigger>
+    51→          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+    52→          <TabsTrigger value="sso">SSO</TabsTrigger>
+    53→          <TabsTrigger value="retention">Data Retention</TabsTrigger>
+    54→          <TabsTrigger value="emails">Email Log</TabsTrigger>
+    55→          <TabsTrigger value="backup">Backup</TabsTrigger>
+    56→        </TabsList>
+    57→
+    58→        <TabsContent value="subscription"><SubscriptionTab /></TabsContent>
+    59→        <TabsContent value="numbering"><NumberingTab /></TabsContent>
+    60→        <TabsContent value="currencies"><CurrenciesTab /></TabsContent>
+    61→        <TabsContent value="duitnow"><DuitNowTab /></TabsContent>
+    62→        <TabsContent value="security"><SecurityTab /></TabsContent>
+    63→        <TabsContent value="api-keys"><ApiKeysTab /></TabsContent>
+    64→        <TabsContent value="webhooks"><WebhooksTab /></TabsContent>
+    65→        <TabsContent value="sso"><SsoTab /></TabsContent>
+    66→        <TabsContent value="retention"><RetentionTab /></TabsContent>
+    67→        <TabsContent value="emails"><EmailLogTab /></TabsContent>
+    68→        <TabsContent value="backup"><BackupTab /></TabsContent>
+    69→      </Tabs>
+    70→    </div>
+    71→  )
+    72→}
+    73→
+    74→// ============ Subscription Tab ============
+    75→function SubscriptionTab() {
+    76→  const [data, setData] = useState<any>(null)
+    77→  const [loading, setLoading] = useState(false)
+    78→  const [error, setError] = useState('')
+    79→  const [success, setSuccess] = useState('')
+    80→
+    81→  const loadData = () => fetch('/api/erp/settings').then(r => r.json()).then(d => { if (d.tenant) setData(d) })
+    82→  useEffect(() => { loadData() }, [])
+    83→
+    84→  async function upgradePlan(plan: string) {
+    85→    if (!confirm(`Upgrade to ${plan.toUpperCase()} plan?`)) return
+    86→    setLoading(true); setError(''); setSuccess('')
+    87→    try {
+    88→      const res = await fetch('/api/erp/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan }) })
+    89→      const d = await res.json()
+    90→      if (!res.ok) throw new Error(d.error)
+    91→      setSuccess(`Upgraded to ${plan.toUpperCase()}!`)
+    92→      loadData()
+    93→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+    94→  }
+    95→
+    96→  if (!data) return <Card className="h-32 animate-pulse bg-muted/40" />
+    97→  const { tenant, allPlans } = data
+    98→  const planOrder = ['free', 'starter', 'pro', 'enterprise']
+    99→
+   100→  return (
+   101→    <div className="space-y-4">
+   102→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   103→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   104→
+   105→      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+   106→        {planOrder.map((plan) => {
+   107→          const planData = allPlans[plan]
+   108→          const isCurrent = tenant.plan === plan
+   109→          const currentIdx = planOrder.indexOf(tenant.plan)
+   110→          const thisIdx = planOrder.indexOf(plan)
+   111→          const isUpgrade = thisIdx > currentIdx
+   112→
+   113→          return (
+   114→            <Card key={plan} className={`p-5 border-2 relative ${isCurrent ? 'border-indigo-500 bg-indigo-50/30' : 'border-border'} ${plan === 'free' ? 'ring-1 ring-emerald-200' : ''}`}>
+   115→              {plan === 'free' && !isCurrent && (
+   116→                <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">Free Forever</div>
+   117→              )}
+   118→              <div className="flex items-center justify-between mb-2">
+   119→                <h4 className="font-semibold capitalize">{plan}</h4>
+   120→                {isCurrent && <Badge className="bg-indigo-500">Current</Badge>}
+   121→              </div>
+   122→              <div className="flex items-baseline gap-1 mb-3">
+   123→                <span className="text-3xl font-bold">${planData.price}</span>
+   124→                <span className="text-sm text-muted-foreground">{planData.price === 0 ? 'forever' : '/user/mo'}</span>
+   125→              </div>
+   126→              <ul className="space-y-1.5 mb-4">
+   127→                {planData.features.map((f: string, i: number) => (
+   128→                  <li key={i} className="flex items-start gap-2 text-xs"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" /><span>{f}</span></li>
+   129→                ))}
+   130→              </ul>
+   131→              {!isCurrent && <Button className="w-full" variant={isUpgrade ? 'default' : 'outline'} disabled={loading} onClick={() => upgradePlan(plan)}>{isUpgrade ? `Upgrade to ${plan}` : `Switch to ${plan}`}</Button>}
+   132→              {isCurrent && <Button className="w-full" disabled>Current Plan</Button>}
+   133→            </Card>
+   134→          )
+   135→        })}
+   136→      </div>
+   137→    </div>
+   138→  )
+   139→}
+   140→
+   141→// ============ Security Tab (2FA) ============
+   142→function SecurityTab() {
+   143→  const [enabled, setEnabled] = useState(false)
+   144→  const [loading, setLoading] = useState(false)
+   145→  const [setupData, setSetupData] = useState<any>(null)
+   146→  const [code, setCode] = useState('')
+   147→  const [disableCode, setDisableCode] = useState('')
+   148→  const [error, setError] = useState('')
+   149→  const [success, setSuccess] = useState('')
+   150→
+   151→  useEffect(() => { fetch('/api/auth/me').then(r => r.json()).then(d => setEnabled(d.user?.twoFactorEnabled || false)) }, [])
+   152→
+   153→  async function startSetup() {
+   154→    setLoading(true); setError('')
+   155→    try {
+   156→      const res = await fetch('/api/erp/2fa/setup', { method: 'POST' })
+   157→      const d = await res.json()
+   158→      if (!res.ok) throw new Error(d.error)
+   159→      setSetupData(d)
+   160→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   161→  }
+   162→
+   163→  async function verifyAndEnable() {
+   164→    setLoading(true); setError('')
+   165→    try {
+   166→      const res = await fetch('/api/erp/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
+   167→      const d = await res.json()
+   168→      if (!res.ok) throw new Error(d.error)
+   169→      setEnabled(true); setSetupData(null); setCode(''); setSuccess('2FA enabled!')
+   170→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   171→  }
+   172→
+   173→  async function disable2FA() {
+   174→    setLoading(true); setError('')
+   175→    try {
+   176→      const res = await fetch('/api/erp/2fa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: disableCode }) })
+   177→      const d = await res.json()
+   178→      if (!res.ok) throw new Error(d.error)
+   179→      setEnabled(false); setDisableCode(''); setSuccess('2FA disabled')
+   180→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   181→  }
+   182→
+   183→  return (
+   184→    <div className="space-y-4">
+   185→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   186→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   187→
+   188→      <Card className="p-5">
+   189→        <div className="flex items-center gap-3 mb-4">
+   190→          <div className="rounded-lg bg-indigo-50 p-2.5"><Smartphone className="h-5 w-5 text-indigo-600" /></div>
+   191→          <div>
+   192→            <h4 className="font-semibold">Two-Factor Authentication (TOTP)</h4>
+   193→            <p className="text-xs text-muted-foreground">Add an extra layer of security with Google Authenticator, Authy, or 1Password</p>
+   194→          </div>
+   195→          <Badge className={enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>{enabled ? 'Enabled' : 'Disabled'}</Badge>
+   196→        </div>
+   197→
+   198→        {!enabled && !setupData && (
+   199→          <Button onClick={startSetup} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Set Up 2FA</Button>
+   200→        )}
+   201→
+   202→        {!enabled && setupData && (
+   203→          <div className="space-y-4">
+   204→            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+   205→              <div>
+   206→                <Label className="text-xs mb-2 block">Scan with your authenticator app:</Label>
+   207→                <img src={setupData.qrCode} alt="2FA QR Code" className="rounded-lg border border-border max-w-[200px]" />
+   208→              </div>
+   209→              <div>
+   210→                <Label className="text-xs mb-1 block">Or enter this secret manually:</Label>
+   211→                <Input readOnly value={setupData.secret} className="font-mono text-xs mb-3" />
+   212→                <Label className="text-xs mb-1 block">Save these backup codes (use once each if you lose your device):</Label>
+   213→                <div className="grid grid-cols-2 gap-1 p-3 rounded-lg bg-muted">
+   214→                  {setupData.backupCodes.map((c: string, i: number) => (
+   215→                    <code key={i} className="text-xs font-mono">{c}</code>
+   216→                  ))}
+   217→                </div>
+   218→              </div>
+   219→            </div>
+   220→            <div className="space-y-2">
+   221→              <Label>Enter the 6-digit code from your authenticator app to verify:</Label>
+   222→              <div className="flex gap-2">
+   223→                <Input value={code} onChange={e => setCode(e.target.value)} placeholder="123456" maxLength={6} className="font-mono text-center text-lg max-w-[160px]" />
+   224→                <Button onClick={verifyAndEnable} disabled={loading || code.length !== 6}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Verify & Enable</Button>
+   225→                <Button variant="outline" onClick={() => setSetupData(null)}>Cancel</Button>
+   226→              </div>
+   227→            </div>
+   228→          </div>
+   229→        )}
+   230→
+   231→        {enabled && (
+   232→          <div className="space-y-3">
+   233→            <Alert className="border-emerald-200 bg-emerald-50">
+   234→              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   235→              <AlertDescription className="text-emerald-800">2FA is enabled. You'll need a code from your authenticator app to login.</AlertDescription>
+   236→            </Alert>
+   237→            <div className="space-y-2">
+   238→              <Label className="text-xs">To disable 2FA, enter a current TOTP code or backup code:</Label>
+   239→              <div className="flex gap-2">
+   240→                <Input value={disableCode} onChange={e => setDisableCode(e.target.value)} placeholder="6-digit code or backup code" className="max-w-[200px]" />
+   241→                <Button variant="destructive" onClick={disable2FA} disabled={loading || !disableCode}>Disable 2FA</Button>
+   242→              </div>
+   243→            </div>
+   244→          </div>
+   245→        )}
+   246→      </Card>
+   247→    </div>
+   248→  )
+   249→}
+   250→
+   251→// ============ API Keys Tab ============
+   252→function ApiKeysTab() {
+   253→  const [keys, setKeys] = useState<any[]>([])
+   254→  const [loading, setLoading] = useState(false)
+   255→  const [error, setError] = useState('')
+   256→  const [newKey, setNewKey] = useState('')
+   257→  const [showCreate, setShowCreate] = useState(false)
+   258→  const [form, setForm] = useState({ name: '', scopes: ['read'], expiresInDays: '' })
+   259→
+   260→  const loadData = () => fetch('/api/erp/api-keys').then(r => r.json()).then(d => setKeys(d.keys || []))
+   261→  useEffect(() => { loadData() }, [])
+   262→
+   263→  async function createKey() {
+   264→    setLoading(true); setError('')
+   265→    try {
+   266→      const res = await fetch('/api/erp/api-keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, expiresInDays: form.expiresInDays ? parseInt(form.expiresInDays) : null }) })
+   267→      const d = await res.json()
+   268→      if (!res.ok) throw new Error(d.error)
+   269→      setNewKey(d.rawKey)
+   270→      setShowCreate(false)
+   271→      setForm({ name: '', scopes: ['read'], expiresInDays: '' })
+   272→      loadData()
+   273→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   274→  }
+   275→
+   276→  async function toggleKey(id: string, isActive: boolean) {
+   277→    await fetch(`/api/erp/api-keys/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive: !isActive }) })
+   278→    loadData()
+   279→  }
+   280→
+   281→  async function deleteKey(id: string) {
+   282→    if (!confirm('Delete this API key permanently?')) return
+   283→    await fetch(`/api/erp/api-keys/${id}`, { method: 'DELETE' })
+   284→    loadData()
+   285→  }
+   286→
+   287→  return (
+   288→    <div className="space-y-4">
+   289→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   290→
+   291→      {newKey && (
+   292→        <Alert className="border-amber-200 bg-amber-50">
+   293→          <KeyRound className="h-4 w-4 text-amber-600" />
+   294→          <AlertDescription className="text-amber-900">
+   295→            <strong>API Key created! Copy it now — it won't be shown again:</strong>
+   296→            <div className="flex items-center gap-2 mt-2">
+   297→              <code className="flex-1 p-2 rounded bg-white border font-mono text-xs break-all">{newKey}</code>
+   298→              <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(newKey) }}><Copy className="h-3 w-3 mr-1" />Copy</Button>
+   299→            </div>
+   300→          </AlertDescription>
+   301→        </Alert>
+   302→      )}
+   303→
+   304→      <SectionCard title="API Keys" subtitle={`${keys.length} keys`} action={<Button size="sm" onClick={() => setShowCreate(!showCreate)}><Plus className="h-4 w-4 mr-2" />Generate Key</Button>}>
+   305→        {showCreate && (
+   306→          <div className="mb-4 p-4 rounded-lg border border-border space-y-3">
+   307→            <div className="grid grid-cols-2 gap-3">
+   308→              <div><Label className="text-xs">Key Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Production API" /></div>
+   309→              <div><Label className="text-xs">Expires in (days, optional)</Label><Input type="number" value={form.expiresInDays} onChange={e => setForm({ ...form, expiresInDays: e.target.value })} placeholder="e.g. 365" /></div>
+   310→            </div>
+   311→            <div>
+   312→              <Label className="text-xs">Scopes</Label>
+   313→              <div className="flex gap-2 flex-wrap mt-1">
+   314→                {['read', 'write', 'admin'].map(s => (
+   315→                  <label key={s} className="flex items-center gap-1.5 text-sm cursor-pointer">
+   316→                    <input type="checkbox" checked={form.scopes.includes(s)} onChange={e => { const next = e.target.checked ? [...form.scopes, s] : form.scopes.filter(x => x !== s); setForm({ ...form, scopes: next }) }} />
+   317→                    {s}
+   318→                  </label>
+   319→                ))}
+   320→              </div>
+   321→            </div>
+   322→            <div className="flex gap-2">
+   323→              <Button size="sm" onClick={createKey} disabled={loading || !form.name}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Generate</Button>
+   324→              <Button size="sm" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+   325→            </div>
+   326→          </div>
+   327→        )}
+   328→
+   329→        <div className="overflow-x-auto">
+   330→          <table className="w-full text-sm">
+   331→            <thead><tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+   332→              <th className="pb-2 pr-4 font-medium">Name</th>
+   333→              <th className="pb-2 pr-4 font-medium">Key</th>
+   334→              <th className="pb-2 pr-4 font-medium">Scopes</th>
+   335→              <th className="pb-2 pr-4 font-medium">Last Used</th>
+   336→              <th className="pb-2 pr-4 font-medium">Expires</th>
+   337→              <th className="pb-2 pr-4 font-medium">Status</th>
+   338→              <th className="pb-2 pr-4 font-medium text-right">Actions</th>
+   339→            </tr></thead>
+   340→            <tbody>
+   341→              {keys.map(k => (
+   342→                <tr key={k.id} className="border-b border-border/40 last:border-0">
+   343→                  <td className="py-3 pr-4 font-medium">{k.name}</td>
+   344→                  <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">{k.keyPrefix}...</td>
+   345→                  <td className="py-3 pr-4">{JSON.parse(k.scopes).map((s: string) => <Badge key={s} variant="outline" className="mr-1 text-xs">{s}</Badge>)}</td>
+   346→                  <td className="py-3 pr-4 text-xs text-muted-foreground">{k.lastUsedAt ? relativeTime(k.lastUsedAt) : 'Never'}</td>
+   347→                  <td className="py-3 pr-4 text-xs">{k.expiresAt ? formatDate(k.expiresAt) : 'Never'}</td>
+   348→                  <td className="py-3 pr-4"><Badge className={k.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>{k.isActive ? 'Active' : 'Revoked'}</Badge></td>
+   349→                  <td className="py-3 pr-4 text-right">
+   350→                    <Button size="sm" variant="ghost" onClick={() => toggleKey(k.id, k.isActive)}><Power className="h-3 w-3 mr-1" />{k.isActive ? 'Revoke' : 'Activate'}</Button>
+   351→                    <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => deleteKey(k.id)}><Trash2 className="h-3 w-3" /></Button>
+   352→                  </td>
+   353→                </tr>
+   354→              ))}
+   355→            </tbody>
+   356→          </table>
+   357→          {keys.length === 0 && <div className="text-center py-8 text-sm text-muted-foreground">No API keys yet</div>}
+   358→        </div>
+   359→      </SectionCard>
+   360→    </div>
+   361→  )
+   362→}
+   363→
+   364→// ============ Webhooks Tab ============
+   365→function WebhooksTab() {
+   366→  const [webhooks, setWebhooks] = useState<any[]>([])
+   367→  const [loading, setLoading] = useState(false)
+   368→  const [error, setError] = useState('')
+   369→  const [showCreate, setShowCreate] = useState(false)
+   370→  const [form, setForm] = useState({ url: '', secret: '', events: [] as string[] })
+   371→
+   372→  const EVENTS = [
+   373→    'order.created', 'order.delivered', 'order.cancelled',
+   374→    'customer.created', 'product.created', 'product.low_stock',
+   375→    'purchase_order.received', 'user.invited', 'tenant.suspended',
+   376→  ]
+   377→
+   378→  const loadData = () => fetch('/api/erp/webhooks').then(r => r.json()).then(d => setWebhooks(d.webhooks || []))
+   379→  useEffect(() => { loadData() }, [])
+   380→
+   381→  async function createWebhook() {
+   382→    setLoading(true); setError('')
+   383→    try {
+   384→      const res = await fetch('/api/erp/webhooks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+   385→      const d = await res.json()
+   386→      if (!res.ok) throw new Error(d.error)
+   387→      setShowCreate(false); setForm({ url: '', secret: '', events: [] }); loadData()
+   388→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   389→  }
+   390→
+   391→  async function deleteWebhook(id: string) {
+   392→    if (!confirm('Delete this webhook?')) return
+   393→    await fetch(`/api/erp/webhooks/${id}`, { method: 'DELETE' })
+   394→    loadData()
+   395→  }
+   396→
+   397→  async function toggleWebhook(id: string, isActive: boolean) {
+   398→    await fetch(`/api/erp/webhooks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ isActive: !isActive }) })
+   399→    loadData()
+   400→  }
+   401→
+   402→  return (
+   403→    <div className="space-y-4">
+   404→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   405→
+   406→      <SectionCard title="Webhooks" subtitle={`${webhooks.length} endpoints`} action={<Button size="sm" onClick={() => setShowCreate(!showCreate)}><Plus className="h-4 w-4 mr-2" />Add Webhook</Button>}>
+   407→        {showCreate && (
+   408→          <div className="mb-4 p-4 rounded-lg border border-border space-y-3">
+   409→            <div><Label className="text-xs">URL *</Label><Input value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://your-app.com/webhook" /></div>
+   410→            <div><Label className="text-xs">Secret (optional, for HMAC signature)</Label><Input value={form.secret} onChange={e => setForm({ ...form, secret: e.target.value })} placeholder="whsec_..." /></div>
+   411→            <div>
+   412→              <Label className="text-xs">Events to subscribe:</Label>
+   413→              <div className="grid grid-cols-2 gap-1 mt-1">
+   414→                {EVENTS.map(e => (
+   415→                  <label key={e} className="flex items-center gap-1.5 text-sm cursor-pointer">
+   416→                    <input type="checkbox" checked={form.events.includes(e)} onChange={ev => { const next = ev.target.checked ? [...form.events, e] : form.events.filter(x => x !== e); setForm({ ...form, events: next }) }} />
+   417→                    <code className="text-xs">{e}</code>
+   418→                  </label>
+   419→                ))}
+   420→              </div>
+   421→            </div>
+   422→            <div className="flex gap-2">
+   423→              <Button size="sm" onClick={createWebhook} disabled={loading || !form.url}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Create</Button>
+   424→              <Button size="sm" variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+   425→            </div>
+   426→          </div>
+   427→        )}
+   428→
+   429→        <div className="space-y-3">
+   430→          {webhooks.map(w => (
+   431→            <Card key={w.id} className="p-4">
+   432→              <div className="flex items-start justify-between mb-2">
+   433→                <div className="flex-1 min-w-0">
+   434→                  <div className="flex items-center gap-2">
+   435→                    <Webhook className="h-4 w-4 text-muted-foreground" />
+   436→                    <code className="text-sm font-mono truncate">{w.url}</code>
+   437→                    <Badge className={w.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}>{w.isActive ? 'Active' : 'Paused'}</Badge>
+   438→                  </div>
+   439→                  <div className="flex flex-wrap gap-1 mt-2">
+   440→                    {JSON.parse(w.events).map((e: string) => <Badge key={e} variant="outline" className="text-xs">{e}</Badge>)}
+   441→                  </div>
+   442→                </div>
+   443→                <div className="flex gap-1">
+   444→                  <Button size="sm" variant="ghost" onClick={() => toggleWebhook(w.id, w.isActive)}><Power className="h-3 w-3" /></Button>
+   445→                  <Button size="sm" variant="ghost" className="text-rose-600" onClick={() => deleteWebhook(w.id)}><Trash2 className="h-3 w-3" /></Button>
+   446→                </div>
+   447→              </div>
+   448→              {w.deliveries?.length > 0 && (
+   449→                <div className="mt-2 pt-2 border-t border-border/40">
+   450→                  <p className="text-xs text-muted-foreground mb-1">Recent deliveries:</p>
+   451→                  <div className="space-y-1">
+   452→                    {w.deliveries.slice(0, 5).map((d: any) => (
+   453→                      <div key={d.id} className="flex items-center gap-2 text-xs">
+   454→                        <Badge className={d.status === 'success' ? 'bg-emerald-100 text-emerald-700' : d.status === 'failed' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}>{d.status}</Badge>
+   455→                        <code className="text-muted-foreground">{d.event}</code>
+   456→                        {d.statusCode && <span className="text-muted-foreground">{d.statusCode}</span>}
+   457→                        <span className="text-muted-foreground">{relativeTime(d.createdAt)}</span>
+   458→                      </div>
+   459→                    ))}
+   460→                  </div>
+   461→                </div>
+   462→              )}
+   463→            </Card>
+   464→          ))}
+   465→          {webhooks.length === 0 && <div className="text-center py-8 text-sm text-muted-foreground">No webhooks configured</div>}
+   466→        </div>
+   467→      </SectionCard>
+   468→    </div>
+   469→  )
+   470→}
+   471→
+   472→// ============ SSO Tab ============
+   473→function SsoTab() {
+   474→  const [config, setConfig] = useState<any>(null)
+   475→  const [loading, setLoading] = useState(false)
+   476→  const [error, setError] = useState('')
+   477→  const [success, setSuccess] = useState('')
+   478→  const [form, setForm] = useState({ provider: 'saml', entityId: '', ssoUrl: '', certificate: '', isActive: false })
+   479→
+   480→  const loadData = () => fetch('/api/erp/sso').then(r => r.json()).then(d => {
+   481→    setConfig(d.config)
+   482→    if (d.config) setForm({ provider: d.config.provider, entityId: d.config.entityId || '', ssoUrl: d.config.ssoUrl || '', certificate: d.config.certificate || '', isActive: d.config.isActive })
+   483→  })
+   484→  useEffect(() => { loadData() }, [])
+   485→
+   486→  async function save() {
+   487→    setLoading(true); setError(''); setSuccess('')
+   488→    try {
+   489→      const res = await fetch('/api/erp/sso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+   490→      const d = await res.json()
+   491→      if (!res.ok) throw new Error(d.error)
+   492→      setSuccess('SSO config saved')
+   493→      loadData()
+   494→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   495→  }
+   496→
+   497→  return (
+   498→    <div className="space-y-4">
+   499→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   500→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   501→
+   502→      <Card className="p-5">
+   503→        <div className="flex items-center gap-3 mb-4">
+   504→          <div className="rounded-lg bg-indigo-50 p-2.5"><Server className="h-5 w-5 text-indigo-600" /></div>
+   505→          <div>
+   506→            <h4 className="font-semibold">SSO / SAML Configuration</h4>
+   507→            <p className="text-xs text-muted-foreground">Configure single sign-on with your identity provider (Okta, Azure AD, Google Workspace)</p>
+   508→          </div>
+   509→          {config?.isActive && <Badge className="bg-emerald-100 text-emerald-700">Enabled</Badge>}
+   510→        </div>
+   511→
+   512→        <div className="space-y-3">
+   513→          <div><Label className="text-xs">Provider</Label>
+   514→            <div className="flex gap-2 mt-1">
+   515→              {['saml', 'oidc'].map(p => (
+   516→                <button key={p} onClick={() => setForm({ ...form, provider: p })} className={`px-3 py-1.5 rounded-lg border text-sm ${form.provider === p ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-border'}`}>{p.toUpperCase()}</button>
+   517→              ))}
+   518→            </div>
+   519→          </div>
+   520→          <div><Label className="text-xs">Entity ID / Issuer</Label><Input value={form.entityId} onChange={e => setForm({ ...form, entityId: e.target.value })} placeholder="https://your-tenant.nexus-erp.com" /></div>
+   521→          <div><Label className="text-xs">SSO Login URL</Label><Input value={form.ssoUrl} onChange={e => setForm({ ...form, ssoUrl: e.target.value })} placeholder="https://your-idp.com/sso/saml" /></div>
+   522→          <div><Label className="text-xs">X.509 Certificate (PEM format)</Label><textarea value={form.certificate} onChange={e => setForm({ ...form, certificate: e.target.value })} placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" className="w-full min-h-[100px] p-2 rounded-lg border border-border font-mono text-xs" /></div>
+   523→          <label className="flex items-center gap-2 text-sm cursor-pointer">
+   524→            <input type="checkbox" checked={form.isActive} onChange={e => setForm({ ...form, isActive: e.target.checked })} />
+   525→            Enable SSO (users will be redirected to IdP on login)
+   526→          </label>
+   527→          <Button onClick={save} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Save SSO Config</Button>
+   528→        </div>
+   529→      </Card>
+   530→    </div>
+   531→  )
+   532→}
+   533→
+   534→// ============ Data Retention Tab ============
+   535→function RetentionTab() {
+   536→  const [settings, setSettings] = useState<any>(null)
+   537→  const [loading, setLoading] = useState(false)
+   538→  const [error, setError] = useState('')
+   539→  const [success, setSuccess] = useState('')
+   540→  const [form, setForm] = useState({ auditLogDays: 365, notificationDays: 90, emailLogDays: 90, autoArchive: true })
+   541→
+   542→  const loadData = () => fetch('/api/erp/retention').then(r => r.json()).then(d => {
+   543→    if (d.settings) { setSettings(d.settings); setForm({ auditLogDays: d.settings.auditLogDays, notificationDays: d.settings.notificationDays, emailLogDays: d.settings.emailLogDays, autoArchive: d.settings.autoArchive }) }
+   544→  })
+   545→  useEffect(() => { loadData() }, [])
+   546→
+   547→  async function save() {
+   548→    setLoading(true); setError(''); setSuccess('')
+   549→    try {
+   550→      const res = await fetch('/api/erp/retention', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+   551→      const d = await res.json()
+   552→      if (!res.ok) throw new Error(d.error)
+   553→      setSuccess('Retention settings saved'); loadData()
+   554→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   555→  }
+   556→
+   557→  async function runCleanup() {
+   558→    if (!confirm('Run cleanup now? This will permanently delete old records based on your settings.')) return
+   559→    setLoading(true); setError(''); setSuccess('')
+   560→    try {
+   561→      const res = await fetch('/api/erp/retention', { method: 'POST' })
+   562→      const d = await res.json()
+   563→      if (!res.ok) throw new Error(d.error)
+   564→      setSuccess(`Cleanup complete: deleted ${d.deleted.auditLogs} audit logs, ${d.deleted.notifications} notifications, ${d.deleted.emailLogs} email logs`)
+   565→      loadData()
+   566→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   567→  }
+   568→
+   569→  if (!settings) return <Card className="h-32 animate-pulse bg-muted/40" />
+   570→
+   571→  return (
+   572→    <div className="space-y-4">
+   573→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   574→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   575→
+   576→      <Card className="p-5">
+   577→        <div className="flex items-center gap-3 mb-4">
+   578→          <div className="rounded-lg bg-indigo-50 p-2.5"><Clock className="h-5 w-5 text-indigo-600" /></div>
+   579→          <div>
+   580→            <h4 className="font-semibold">Data Retention Policy</h4>
+   581→            <p className="text-xs text-muted-foreground">Automatically delete old records to comply with data regulations</p>
+   582→          </div>
+   583→        </div>
+   584→        <div className="space-y-4">
+   585→          <div className="grid grid-cols-3 gap-3">
+   586→            <div><Label className="text-xs">Audit Log Retention (days)</Label><Input type="number" value={form.auditLogDays} onChange={e => setForm({ ...form, auditLogDays: parseInt(e.target.value) || 0 })} /><p className="text-xs text-muted-foreground mt-1">0 = never delete</p></div>
+   587→            <div><Label className="text-xs">Notification Retention (days)</Label><Input type="number" value={form.notificationDays} onChange={e => setForm({ ...form, notificationDays: parseInt(e.target.value) || 0 })} /></div>
+   588→            <div><Label className="text-xs">Email Log Retention (days)</Label><Input type="number" value={form.emailLogDays} onChange={e => setForm({ ...form, emailLogDays: parseInt(e.target.value) || 0 })} /></div>
+   589→          </div>
+   590→          <label className="flex items-center gap-2 text-sm cursor-pointer">
+   591→            <input type="checkbox" checked={form.autoArchive} onChange={e => setForm({ ...form, autoArchive: e.target.checked })} />
+   592→            Auto-archive (run cleanup automatically daily)
+   593→          </label>
+   594→          {settings.lastRunAt && <p className="text-xs text-muted-foreground">Last cleanup: {formatDate(settings.lastRunAt)} ({relativeTime(settings.lastRunAt)})</p>}
+   595→          <div className="flex gap-2">
+   596→            <Button onClick={save} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Save Settings</Button>
+   597→            <Button variant="outline" onClick={runCleanup} disabled={loading}>Run Cleanup Now</Button>
+   598→          </div>
+   599→        </div>
+   600→      </Card>
+   601→    </div>
+   602→  )
+   603→}
+   604→
+   605→// ============ Email Log Tab ============
+   606→function EmailLogTab() {
+   607→  const [emails, setEmails] = useState<any[]>([])
+   608→  const [selected, setSelected] = useState<any>(null)
+   609→
+   610→  const loadData = () => fetch('/api/erp/email-log').then(r => r.json()).then(d => setEmails(d.emails || []))
+   611→  useEffect(() => { loadData() }, [])
+   612→
+   613→  return (
+   614→    <SectionCard title="Email Log" subtitle={`${emails.length} emails sent (simulated)`}>
+   615→      <div className="overflow-x-auto">
+   616→        <table className="w-full text-sm">
+   617→          <thead><tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+   618→            <th className="pb-2 pr-4 font-medium">To</th>
+   619→            <th className="pb-2 pr-4 font-medium">Subject</th>
+   620→            <th className="pb-2 pr-4 font-medium">Type</th>
+   621→            <th className="pb-2 pr-4 font-medium">Status</th>
+   622→            <th className="pb-2 pr-4 font-medium">Sent</th>
+   623→            <th className="pb-2 pr-4 font-medium"></th>
+   624→          </tr></thead>
+   625→          <tbody>
+   626→            {emails.map(e => (
+   627→              <tr key={e.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30 cursor-pointer" onClick={() => setSelected(e)}>
+   628→                <td className="py-3 pr-4">{e.to}</td>
+   629→                <td className="py-3 pr-4 font-medium">{e.subject}</td>
+   630→                <td className="py-3 pr-4"><Badge variant="outline" className="text-xs">{e.type}</Badge></td>
+   631→                <td className="py-3 pr-4"><Badge className={e.status === 'sent' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}>{e.status}</Badge></td>
+   632→                <td className="py-3 pr-4 text-xs text-muted-foreground">{relativeTime(e.createdAt)}</td>
+   633→                <td className="py-3 pr-4"><Mail className="h-3 w-3 text-muted-foreground" /></td>
+   634→              </tr>
+   635→            ))}
+   636→          </tbody>
+   637→        </table>
+   638→        {emails.length === 0 && <div className="text-center py-8 text-sm text-muted-foreground">No emails sent yet</div>}
+   639→      </div>
+   640→
+   641→      {selected && (
+   642→        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelected(null)}>
+   643→          <Card className="p-5 max-w-lg w-full" onClick={e => e.stopPropagation()}>
+   644→            <div className="flex items-center justify-between mb-3">
+   645→              <h4 className="font-semibold">Email Details</h4>
+   646→              <Button size="sm" variant="ghost" onClick={() => setSelected(null)}>Close</Button>
+   647→            </div>
+   648→            <div className="space-y-2 text-sm">
+   649→              <div><span className="text-muted-foreground">To:</span> {selected.to}</div>
+   650→              <div><span className="text-muted-foreground">Subject:</span> {selected.subject}</div>
+   651→              <div><span className="text-muted-foreground">Type:</span> {selected.type}</div>
+   652→              <div><span className="text-muted-foreground">Sent:</span> {formatDate(selected.createdAt)}</div>
+   653→              <div><span className="text-muted-foreground">Status:</span> {selected.status}</div>
+   654→              <div className="mt-3 p-3 rounded-lg bg-muted whitespace-pre-wrap font-mono text-xs">{selected.body}</div>
+   655→            </div>
+   656→          </Card>
+   657→        </div>
+   658→      )}
+   659→    </SectionCard>
+   660→  )
+   661→}
+   662→
+   663→// ============ DuitNow QR Tab ============
+   664→function DuitNowTab() {
+   665→  const [data, setData] = useState<any>(null)
+   666→  const [loading, setLoading] = useState(false)
+   667→  const [error, setError] = useState('')
+   668→  const [success, setSuccess] = useState('')
+   669→  const [form, setForm] = useState({ merchantId: '', apiKey: '', apiSecret: '', isLive: false, displayName: 'Pay with DuitNow QR', webhookUrl: '' })
+   670→
+   671→  const loadData = () => fetch('/api/erp/duitnow').then(r => r.json()).then(d => {
+   672→    if (d.settings) {
+   673→      setData(d.settings)
+   674→      setForm({
+   675→        merchantId: d.settings.merchantId || '',
+   676→        apiKey: d.settings.apiKey || '',
+   677→        apiSecret: '', // don't pre-fill secret
+   678→        isLive: d.settings.isLive,
+   679→        displayName: d.settings.displayName,
+   680→        webhookUrl: d.settings.webhookUrl || '',
+   681→      })
+   682→    }
+   683→  })
+   684→  useEffect(() => { loadData() }, [])
+   685→
+   686→  async function save() {
+   687→    setLoading(true); setError(''); setSuccess('')
+   688→    try {
+   689→      const res = await fetch('/api/erp/duitnow', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+   690→      const d = await res.json()
+   691→      if (!res.ok) throw new Error(d.error)
+   692→      setSuccess('DuitNow settings saved'); loadData()
+   693→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   694→  }
+   695→
+   696→  if (!data) return <Card className="h-32 animate-pulse bg-muted/40" />
+   697→
+   698→  return (
+   699→    <div className="space-y-4">
+   700→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   701→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   702→
+   703→      <Card className="p-5">
+   704→        <div className="flex items-center gap-3 mb-4">
+   705→          <div className="rounded-lg bg-blue-50 p-2.5">
+   706→            <svg viewBox="0 0 24 24" className="h-5 w-5 text-blue-600" fill="currentColor"><path d="M3 3h18v18H3V3zm6 4h-2v2h2V7zm0 4h-2v2h2v-2zm0 4h-2v2h2v-2zm8-8h-6v2h6V7zm0 4h-6v2h6v-2zm0 4h-6v2h6v-2z"/></svg>
+   707→          </div>
+   708→          <div>
+   709→            <h4 className="font-semibold">DuitNow QR Payment</h4>
+   710→            <p className="text-xs text-muted-foreground">Accept payments via Touch 'n Go, GrabPay, Boost, ShopeePay, and all Malaysian bank apps with one QR code</p>
+   711→          </div>
+   712→          <Badge className={data.isLive ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}>{data.isLive ? 'Live' : 'Demo Mode'}</Badge>
+   713→        </div>
+   714→
+   715→        <div className="space-y-4">
+   716→          <div className="grid grid-cols-2 gap-3">
+   717→            <div>
+   718→              <Label className="text-xs">Merchant ID</Label>
+   719→              <Input value={form.merchantId} onChange={e => setForm({ ...form, merchantId: e.target.value })} placeholder="DN-MERCHANT-XXXXX" />
+   720→            </div>
+   721→            <div>
+   722→              <Label className="text-xs">Display Name (shown on payment page)</Label>
+   723→              <Input value={form.displayName} onChange={e => setForm({ ...form, displayName: e.target.value })} />
+   724→            </div>
+   725→          </div>
+   726→          <div className="grid grid-cols-2 gap-3">
+   727→            <div>
+   728→              <Label className="text-xs">API Key</Label>
+   729→              <Input value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value })} placeholder="Your gateway API key" />
+   730→            </div>
+   731→            <div>
+   732→              <Label className="text-xs">API Secret {data.apiSecret && <span className="text-muted-foreground ml-1">(current: {data.apiSecret})</span>}</Label>
+   733→              <Input type="password" value={form.apiSecret} onChange={e => setForm({ ...form, apiSecret: e.target.value })} placeholder="Enter new secret to change" />
+   734→            </div>
+   735→          </div>
+   736→          <div>
+   737→            <Label className="text-xs">Webhook URL (for payment callbacks)</Label>
+   738→            <Input value={form.webhookUrl} onChange={e => setForm({ ...form, webhookUrl: e.target.value })} placeholder="https://yourapp.com/api/erp/duitnow/webhook" />
+   739→            <p className="text-[10px] text-muted-foreground mt-1">Set this URL in your payment gateway dashboard to receive payment notifications</p>
+   740→          </div>
+   741→
+   742→          <label className="flex items-center gap-2 text-sm cursor-pointer">
+   743→            <input type="checkbox" checked={form.isLive} onChange={e => setForm({ ...form, isLive: e.target.checked })} />
+   744→            Enable Live Mode (uncheck to use demo mode for testing)
+   745→          </label>
+   746→
+   747→          <Alert className="border-blue-200 bg-blue-50">
+   748→            <AlertCircle className="h-4 w-4 text-blue-600" />
+   749→            <AlertDescription className="text-blue-800 text-xs">
+   750→              <strong>How to get DuitNow merchant credentials:</strong>
+   751→              <br />
+   752→              1. Register with a payment gateway (Revenue Monster, iPay88, or SenangPay)
+   753→              <br />2. Submit your business registration documents (SSM, bank statement)
+   754→              <br />3. Get approved (1-3 business days)
+   755→              <br />4. Copy your Merchant ID, API Key, and API Secret here
+   756→              <br />5. Set the webhook URL in your gateway dashboard
+   757→              <br />6. Check "Enable Live Mode" to start accepting real payments
+   758→            </AlertDescription>
+   759→          </Alert>
+   760→
+   761→          <Button onClick={save} disabled={loading}>
+   762→            {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Save DuitNow Settings
+   763→          </Button>
+   764→        </div>
+   765→      </Card>
+   766→
+   767→      {/* Supported wallets info */}
+   768→      <Card className="p-4">
+   769→        <p className="text-xs font-medium text-muted-foreground mb-2">Your customers can pay with:</p>
+   770→        <div className="flex flex-wrap gap-2">
+   771→          {["Touch 'n Go", 'GrabPay', 'Boost', 'ShopeePay', 'Maybank QRPay', 'CIMB QRPay', 'RHB Pay', 'All Bank Apps'].map(w => (
+   772→            <Badge key={w} variant="outline" className="text-xs">{w}</Badge>
+   773→          ))}
+   774→        </div>
+   775→      </Card>
+   776→    </div>
+   777→  )
+   778→}
+   779→
+   780→// ============ Currencies Tab ============
+   781→function CurrenciesTab() {
+   782→  const [data, setData] = useState<any>(null)
+   783→  const [loading, setLoading] = useState(false)
+   784→  const [error, setError] = useState('')
+   785→  const [success, setSuccess] = useState('')
+   786→  const [showAdd, setShowAdd] = useState(false)
+   787→  const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '', rate: '' })
+   788→
+   789→  const loadData = () => fetch('/api/erp/currencies').then(r => r.json()).then(setData)
+   790→  useEffect(() => { loadData() }, [])
+   791→
+   792→  async function setBase(currencyId: string, code: string) {
+   793→    if (!confirm(`Set ${code} as your base currency? All existing prices will be interpreted as ${code}.`)) return
+   794→    setLoading(true); setError('')
+   795→    try {
+   796→      const res = await fetch('/api/erp/currencies', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_base', currencyId, newBaseCode: code }) })
+   797→      const d = await res.json()
+   798→      if (!res.ok) throw new Error(d.error)
+   799→      setSuccess(`Base currency set to ${code}`); loadData()
+   800→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   801→  }
+   802→
+   803→  async function updateRate(currencyId: string, code: string) {
+   804→    const rate = prompt(`Enter new exchange rate for ${code} (1 USD = ? ${code}):`)
+   805→    if (!rate) return
+   806→    setLoading(true); setError('')
+   807→    try {
+   808→      const res = await fetch('/api/erp/currencies', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_rate', currencyId, rate }) })
+   809→      const d = await res.json()
+   810→      if (!res.ok) throw new Error(d.error)
+   811→      setSuccess(`${code} rate updated to ${rate}`); loadData()
+   812→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   813→  }
+   814→
+   815→  async function addCurrency() {
+   816→    setLoading(true); setError('')
+   817→    try {
+   818→      const res = await fetch('/api/erp/currencies', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add_currency', ...newCurrency, rate: newCurrency.rate || '1' }) })
+   819→      const d = await res.json()
+   820→      if (!res.ok) throw new Error(d.error)
+   821→      setShowAdd(false); setNewCurrency({ code: '', name: '', symbol: '', rate: '' }); loadData()
+   822→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   823→  }
+   824→
+   825→  if (!data) return <Card className="h-32 animate-pulse bg-muted/40" />
+   826→
+   827→  return (
+   828→    <div className="space-y-4">
+   829→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   830→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   831→
+   832→      <SectionCard title="Currencies" subtitle={`${data.currencies?.length || 0} currencies`} action={<Button size="sm" onClick={() => setShowAdd(!showAdd)}><Plus className="h-4 w-4 mr-2" />Add Currency</Button>}>
+   833→        {showAdd && (
+   834→          <div className="mb-4 p-4 rounded-lg border border-border grid grid-cols-4 gap-3 items-end">
+   835→            <div><Label className="text-xs">Code</Label><Input value={newCurrency.code} onChange={e => setNewCurrency({ ...newCurrency, code: e.target.value.toUpperCase() })} placeholder="THB" /></div>
+   836→            <div><Label className="text-xs">Name</Label><Input value={newCurrency.name} onChange={e => setNewCurrency({ ...newCurrency, name: e.target.value })} placeholder="Thai Baht" /></div>
+   837→            <div><Label className="text-xs">Symbol</Label><Input value={newCurrency.symbol} onChange={e => setNewCurrency({ ...newCurrency, symbol: e.target.value })} placeholder="฿" /></div>
+   838→            <div><Label className="text-xs">Rate (1 USD = ?)</Label><Input type="number" step="0.01" value={newCurrency.rate} onChange={e => setNewCurrency({ ...newCurrency, rate: e.target.value })} placeholder="35.5" /></div>
+   839→            <div className="col-span-4 flex gap-2"><Button size="sm" onClick={addCurrency}>Add</Button><Button size="sm" variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button></div>
+   840→          </div>
+   841→        )}
+   842→
+   843→        <div className="overflow-x-auto">
+   844→          <table className="w-full text-sm">
+   845→            <thead><tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+   846→              <th className="pb-2 pr-4 font-medium">Code</th>
+   847→              <th className="pb-2 pr-4 font-medium">Name</th>
+   848→              <th className="pb-2 pr-4 font-medium">Symbol</th>
+   849→              <th className="pb-2 pr-4 font-medium text-right">Rate (per USD)</th>
+   850→              <th className="pb-2 pr-4 font-medium">Status</th>
+   851→              <th className="pb-2 pr-4 font-medium text-right">Actions</th>
+   852→            </tr></thead>
+   853→            <tbody>
+   854→              {data.currencies?.map((c: any) => (
+   855→                <tr key={c.id} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+   856→                  <td className="py-3 pr-4 font-mono font-medium">{c.code}</td>
+   857→                  <td className="py-3 pr-4">{c.name}</td>
+   858→                  <td className="py-3 pr-4 text-lg">{c.symbol}</td>
+   859→                  <td className="py-3 pr-4 text-right tabular-nums">{c.exchangeRates?.[0]?.rate?.toFixed(4) || '1.0000'}</td>
+   860→                  <td className="py-3 pr-4">{c.isBase ? <Badge className="bg-indigo-100 text-indigo-700">Base Currency</Badge> : <Badge variant="outline">Active</Badge>}</td>
+   861→                  <td className="py-3 pr-4 text-right">
+   862→                    {!c.isBase && (
+   863→                      <>
+   864→                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => updateRate(c.id, c.code)}>Update Rate</Button>
+   865→                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setBase(c.id, c.code)}>Set as Base</Button>
+   866→                      </>
+   867→                    )}
+   868→                  </td>
+   869→                </tr>
+   870→              ))}
+   871→            </tbody>
+   872→          </table>
+   873→        </div>
+   874→      </SectionCard>
+   875→
+   876→      <Card className="p-4">
+   877→        <div className="flex items-center gap-3">
+   878→          <Globe className="h-5 w-5 text-indigo-600" />
+   879→          <div>
+   880→            <h4 className="font-semibold text-sm">How Multi-Currency Works</h4>
+   881→            <p className="text-xs text-muted-foreground mt-1">Your base currency is used for all accounting and reports. When you create orders or payments in a different currency, the system converts amounts using the latest exchange rate. Update rates regularly for accurate financials.</p>
+   882→          </div>
+   883→        </div>
+   884→      </Card>
+   885→    </div>
+   886→  )
+   887→}
+   888→
+   889→// ============ Numbering Tab ============
+   890→function NumberingTab() {
+   891→  const [settings, setSettings] = useState<any>(null)
+   892→  const [previews, setPreviews] = useState<Record<string, string>>({})
+   893→  const [loading, setLoading] = useState(false)
+   894→  const [error, setError] = useState('')
+   895→  const [success, setSuccess] = useState('')
+   896→  const [form, setForm] = useState<any>({})
+   897→
+   898→  const loadData = () => fetch('/api/erp/numbering').then(r => r.json()).then(d => {
+   899→    if (d.settings) {
+   900→      setSettings(d.settings)
+   901→      setPreviews(d.previews || {})
+   902→      setForm({
+   903→        salesOrderPrefix: d.settings.salesOrderPrefix,
+   904→        salesOrderStart: d.settings.salesOrderStart,
+   905→        purchaseOrderPrefix: d.settings.purchaseOrderPrefix,
+   906→        purchaseOrderStart: d.settings.purchaseOrderStart,
+   907→        invoicePrefix: d.settings.invoicePrefix,
+   908→        invoiceStart: d.settings.invoiceStart,
+   909→        customerPrefix: d.settings.customerPrefix,
+   910→        customerStart: d.settings.customerStart,
+   911→        supplierPrefix: d.settings.supplierPrefix,
+   912→        supplierStart: d.settings.supplierStart,
+   913→        productPrefix: d.settings.productPrefix,
+   914→        productStart: d.settings.productStart,
+   915→        employeePrefix: d.settings.employeePrefix,
+   916→        employeeStart: d.settings.employeeStart,
+   917→        transactionPrefix: d.settings.transactionPrefix,
+   918→        transactionStart: d.settings.transactionStart,
+   919→      })
+   920→    }
+   921→  })
+   922→  useEffect(() => { loadData() }, [])
+   923→
+   924→  async function save() {
+   925→    setLoading(true); setError(''); setSuccess('')
+   926→    try {
+   927→      const res = await fetch('/api/erp/numbering', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+   928→      const d = await res.json()
+   929→      if (!res.ok) throw new Error(d.error)
+   930→      setSuccess('Numbering settings saved'); loadData()
+   931→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   932→  }
+   933→
+   934→  if (!settings) return <Card className="h-32 animate-pulse bg-muted/40" />
+   935→
+   936→  const ENTITIES = [
+   937→    { key: 'salesOrder', label: 'Sales Orders', icon: '🛒' },
+   938→    { key: 'purchaseOrder', label: 'Purchase Orders', icon: '📦' },
+   939→    { key: 'invoice', label: 'Invoices', icon: '🧾' },
+   940→    { key: 'customer', label: 'Customers', icon: '👤' },
+   941→    { key: 'supplier', label: 'Suppliers', icon: '🏭' },
+   942→    { key: 'product', label: 'Products / SKU', icon: '🏷️' },
+   943→    { key: 'employee', label: 'Employees', icon: '👷' },
+   944→    { key: 'transaction', label: 'Transactions', icon: '💰' },
+   945→  ]
+   946→
+   947→  return (
+   948→    <div className="space-y-4">
+   949→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+   950→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+   951→
+   952→      <Card className="p-5">
+   953→        <div className="flex items-center gap-3 mb-4">
+   954→          <div className="rounded-lg bg-indigo-50 p-2.5"><Database className="h-5 w-5 text-indigo-600" /></div>
+   955→          <div>
+   956→            <h4 className="font-semibold">Document Numbering & Prefixes</h4>
+   957→            <p className="text-xs text-muted-foreground">Customize how your order numbers, customer codes, SKUs, etc. are generated</p>
+   958→          </div>
+   959→        </div>
+   960→
+   961→        <div className="space-y-3">
+   962→          {ENTITIES.map(entity => (
+   963→            <div key={entity.key} className="grid grid-cols-12 gap-3 items-end p-3 rounded-lg border border-border/60">
+   964→              <div className="col-span-12 sm:col-span-3">
+   965→                <Label className="text-xs">{entity.icon} {entity.label}</Label>
+   966→                <div className="mt-1 text-sm font-mono text-indigo-600">{previews[entity.key] || '—'}</div>
+   967→                <p className="text-[10px] text-muted-foreground">Next number preview</p>
+   968→              </div>
+   969→              <div className="col-span-7 sm:col-span-5">
+   970→                <Label className="text-xs">Prefix</Label>
+   971→                <Input value={form[`${entity.key}Prefix`] || ''} onChange={e => setForm({ ...form, [`${entity.key}Prefix`]: e.target.value })} className="font-mono" />
+   972→              </div>
+   973→              <div className="col-span-5 sm:col-span-4">
+   974→                <Label className="text-xs">Starting #</Label>
+   975→                <Input type="number" value={form[`${entity.key}Start`] || 0} onChange={e => setForm({ ...form, [`${entity.key}Start`]: e.target.value })} />
+   976→              </div>
+   977→            </div>
+   978→          ))}
+   979→        </div>
+   980→
+   981→        <div className="mt-4 flex items-center justify-between">
+   982→          <p className="text-xs text-muted-foreground">⚠️ Changing the starting number only affects NEW records. Existing records keep their current numbers.</p>
+   983→          <Button onClick={save} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Save Settings</Button>
+   984→        </div>
+   985→      </Card>
+   986→    </div>
+   987→  )
+   988→}
+   989→
+   990→// ============ Backup Tab ============
+   991→function BackupTab() {
+   992→  const [uploading, setUploading] = useState(false)
+   993→  const [error, setError] = useState('')
+   994→  const [success, setSuccess] = useState('')
+   995→  const fileInputRef = useRef<HTMLInputElement>(null)
+   996→
+   997→  async function uploadBackup(file: File) {
+   998→    setUploading(true); setError(''); setSuccess('')
+   999→    try {
+  1000→      const text = await file.text()
+  1001→      const backup = JSON.parse(text)
+  1002→      const res = await fetch('/api/erp/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup }) })
+  1003→      const d = await res.json()
+  1004→      if (!res.ok) throw new Error(d.error)
+  1005→      setSuccess(`Imported: ${d.imported?.products || 0} products, ${d.imported?.customers || 0} customers, ${d.imported?.suppliers || 0} suppliers, ${d.imported?.employees || 0} employees, ${d.imported?.transactions || 0} transactions`)
+  1006→    } catch (e: any) { setError('Invalid file: ' + e.message) } finally { setUploading(false) }
+  1007→  }
+  1008→
+  1009→  return (
+  1010→    <div className="space-y-4">
+  1011→      {error && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{error}</AlertDescription></Alert>}
+  1012→      {success && <Alert className="border-emerald-200 bg-emerald-50"><CheckCircle2 className="h-4 w-4 text-emerald-600" /><AlertDescription className="text-emerald-800">{success}</AlertDescription></Alert>}
+  1013→
+  1014→      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  1015→        <Card className="p-5">
+  1016→          <div className="flex items-center gap-3 mb-3"><div className="rounded-lg bg-indigo-50 p-2.5"><Download className="h-5 w-5 text-indigo-600" /></div><div><h4 className="font-semibold">Export Backup</h4><p className="text-xs text-muted-foreground">Download all your tenant data as JSON</p></div></div>
+  1017→          <p className="text-xs text-muted-foreground mb-4">Includes all products, customers, suppliers, orders, POs, employees, transactions. Excludes password hashes.</p>
+  1018→          <Button onClick={() => window.location.href = '/api/erp/backup'} className="w-full"><Download className="h-4 w-4 mr-2" /> Download Backup</Button>
+  1019→        </Card>
+  1020→        <Card className="p-5">
+  1021→          <div className="flex items-center gap-3 mb-3"><div className="rounded-lg bg-amber-50 p-2.5"><Upload className="h-5 w-5 text-amber-600" /></div><div><h4 className="font-semibold">Restore Backup</h4><p className="text-xs text-muted-foreground">Import data from a previous backup</p></div></div>
+  1022→          <p className="text-xs text-muted-foreground mb-4">Merges new records into your tenant (skips duplicates by SKU/email/name).</p>
+  1023→          <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadBackup(f); e.target.value = '' }} />
+  1024→          <Button variant="outline" className="w-full" disabled={uploading} onClick={() => fileInputRef.current?.click()}>{uploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}{uploading ? 'Importing...' : 'Upload & Restore'}</Button>
+  1025→        </Card>
+  1026→      </div>
+  1027→    </div>
+  1028→  )
+  1029→}
+  1030→

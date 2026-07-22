@@ -1,0 +1,695 @@
+     1→import { NextRequest, NextResponse } from 'next/server'
+     2→import { db } from '@/lib/db'
+     3→import { getCurrentUser } from '@/lib/session'
+     4→import { logAction } from '@/lib/audit'
+     5→import { recordsToCsv, withBom } from '@/lib/csv-export'
+     6→import { parseCsv } from '@/lib/csv-import'
+     7→
+     8→// GET /api/erp/backup - download tenant data as JSON (includes ALL customization)
+     9→// OWNER: ?tenantId=xxx for specific tenant, or no param for full DB
+    10→// TENANT_ADMIN: only their own tenant
+    11→export async function GET(req: NextRequest) {
+    12→  const user = await getCurrentUser()
+    13→  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    14→  if (!['OWNER', 'TENANT_ADMIN'].includes(user.role)) {
+    15→    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+    16→  }
+    17→
+    18→  const url = new URL(req.url)
+    19→  const targetTenantId = url.searchParams.get('tenantId')
+    20→  const format = (url.searchParams.get('format') || 'json').toLowerCase()
+    21→
+    22→  let tenantIds: string[] = []
+    23→  let isFullBackup = false
+    24→
+    25→  if (user.role === 'OWNER') {
+    26→    if (targetTenantId) {
+    27→      tenantIds = [targetTenantId]
+    28→    } else {
+    29→      const allTenants = await db.tenant.findMany({ select: { id: true } })
+    30→      tenantIds = allTenants.map(t => t.id)
+    31→      isFullBackup = true
+    32→    }
+    33→  } else {
+    34→    if (!user.tenantId) return NextResponse.json({ error: 'No tenant' }, { status: 400 })
+    35→    tenantIds = [user.tenantId]
+    36→  }
+    37→
+    38→  const tidFilter = { tenantId: { in: tenantIds } }
+    39→
+    40→  const backup: any = {
+    41→    _meta: {
+    42→      version: '2.0',
+    43→      exportedAt: new Date().toISOString(),
+    44→      exportedBy: { email: user.email, role: user.role },
+    45→      scope: isFullBackup ? 'full' : 'tenant',
+    46→      tenantIds,
+    47→    },
+    48→    // Core business data
+    49→    tenants: [],
+    50→    users: [],
+    51→    products: [],
+    52→    customers: [],
+    53→    suppliers: [],
+    54→    salesOrders: [],
+    55→    salesOrderItems: [],
+    56→    purchaseOrders: [],
+    57→    purchaseOrderItems: [],
+    58→    employees: [],
+    59→    transactions: [],
+    60→    activities: [],
+    61→    auditLogs: [],
+    62→    notifications: [],
+    63→    payments: [],
+    64→    // Customization & configuration
+    65→    customFields: [],
+    66→    customFieldValues: [],
+    67→    customTabs: [],
+    68→    statusPipelines: [],
+    69→    recordNotes: [],
+    70→    moduleLabels: [],
+    71→    fileAttachments: [],
+    72→    invoiceTemplate: [],
+    73→    encounterTemplates: [],
+    74→    clinicalEncounters: [],
+    75→    documentTemplates: [],
+    76→    // Financial config
+    77→    currencies: [],
+    78→    exchangeRates: [],
+    79→    duitNowSettings: [],
+    80→    // Inventory config
+    81→    warehouses: [],
+    82→    // Numbering
+    83→    numberSettings: [],
+    84→    // Rewards (tenant-owned CONFIG ONLY — all Nex Coin DATA is platform-owned)
+    85→    rewardConfig: [],
+    86→    rewardTasks: [],
+    87→    partnerShops: [],
+    88→    shopCatalogItems: [],
+    89→    // NOTE: pointTransactions, redemptionCodes, and nexCoins balances are
+    90→    // ALL PLATFORM-OWNED and NEVER included in tenant backups.
+    91→  }
+    92→
+    93→  // Core data — exclude nexCoins from tenant export (platform-owned)
+    94→  backup.tenants = await db.tenant.findMany({
+    95→    where: { id: { in: tenantIds } },
+    96→    select: {
+    97→      id: true, name: true, industry: true, plan: true, status: true, seats: true,
+    98→      logoUrl: true, primaryColor: true, suspendedAt: true, suspendedReason: true,
+    99→      createdAt: true, updatedAt: true,
+   100→      // NOTE: nexCoins is EXCLUDED — platform-owned
+   101→    },
+   102→  })
+   103→  backup.users = await db.user.findMany({
+   104→    where: { tenantId: { in: tenantIds } },
+   105→    select: {
+   106→      id: true, email: true, name: true, role: true, tenantId: true,
+   107→      status: true, emailVerified: true, lastLoginAt: true,
+   108→      createdAt: true, updatedAt: true,
+   109→      // Include portal type + module permissions (tenant-owned config)
+   110→      portalType: true, modulePermissions: true,
+   111→      // NOTE: 'points' (Nex Coins) is PLATFORM-OWNED and EXCLUDED
+   112→    },
+   113→  })
+   114→  backup.products = await db.product.findMany({ where: tidFilter })
+   115→  backup.customers = await db.customer.findMany({ where: tidFilter })
+   116→  backup.suppliers = await db.supplier.findMany({ where: tidFilter })
+   117→  backup.employees = await db.employee.findMany({ where: tidFilter })
+   118→  backup.transactions = await db.transaction.findMany({ where: tidFilter })
+   119→  backup.activities = await db.activity.findMany({ where: tidFilter })
+   120→  backup.notifications = await db.notification.findMany({ where: tidFilter })
+   121→  backup.auditLogs = await db.auditLog.findMany({ where: tidFilter })
+   122→  backup.payments = await db.payment.findMany({ where: tidFilter })
+   123→
+   124→  // Orders + items
+   125→  const orders = await db.salesOrder.findMany({ where: tidFilter })
+   126→  backup.salesOrders = orders
+   127→  if (orders.length > 0) {
+   128→    backup.salesOrderItems = await db.salesOrderItem.findMany({ where: { order: { tenantId: { in: tenantIds } } } })
+   129→  }
+   130→  const pos = await db.purchaseOrder.findMany({ where: tidFilter })
+   131→  backup.purchaseOrders = pos
+   132→  if (pos.length > 0) {
+   133→    backup.purchaseOrderItems = await db.purchaseOrderItem.findMany({ where: { po: { tenantId: { in: tenantIds } } } })
+   134→  }
+   135→
+   136→  // ── Customization & configuration (THE IMPORTANT STUFF) ──
+   137→  backup.customFields = await db.customField.findMany({ where: tidFilter })
+   138→  backup.customFieldValues = await db.customFieldValue.findMany({ where: tidFilter })
+   139→  backup.customTabs = await db.customTab.findMany({ where: tidFilter })
+   140→  backup.statusPipelines = await db.statusPipeline.findMany({ where: tidFilter })
+   141→  backup.recordNotes = await db.recordNote.findMany({ where: tidFilter })
+   142→  backup.moduleLabels = await db.moduleLabel.findMany({ where: tidFilter })
+   143→  backup.fileAttachments = await db.fileAttachment.findMany({
+   144→    where: tidFilter,
+   145→    // Don't export base64 data (too large) — just metadata
+   146→    select: { id: true, tenantId: true, entityType: true, entityId: true, fileName: true, fileSize: true, mimeType: true, uploadedBy: true, createdAt: true },
+   147→  })
+   148→  backup.invoiceTemplate = await db.invoiceTemplate.findMany({ where: tidFilter })
+   149→  backup.encounterTemplates = await db.encounterTemplate.findMany({ where: tidFilter })
+   150→  backup.clinicalEncounters = await db.clinicalEncounter.findMany({ where: tidFilter })
+   151→  backup.documentTemplates = await db.documentTemplate.findMany({ where: tidFilter })
+   152→
+   153→  // Financial config
+   154→  backup.currencies = await db.currency.findMany({ where: tidFilter })
+   155→  backup.exchangeRates = await db.exchangeRate.findMany({ where: tidFilter })
+   156→  backup.duitNowSettings = await db.duitNowSettings.findMany({ where: tidFilter })
+   157→
+   158→  // Inventory config
+   159→  backup.warehouses = await db.warehouse.findMany({ where: tidFilter })
+   160→
+   161→  // Numbering
+   162→  backup.numberSettings = await db.tenantNumberSetting.findMany({ where: tidFilter })
+   163→
+   164→  // ---- Rewards CONFIG ONLY (no coin data) ----
+   165→  // rewardConfig, rewardTasks, partnerShops, shopCatalogItems = tenant-owned config
+   166→  // pointTransactions, redemptionCodes, nexCoins = PLATFORM-OWNED (coin data) — NEVER exported
+   167→  backup.rewardConfig = await db.rewardConfig.findMany({ where: tidFilter })
+   168→  backup.rewardTasks = await db.rewardTask.findMany({ where: tidFilter })
+   169→  backup.partnerShops = await db.partnerShop.findMany({ where: tidFilter })
+   170→  backup.shopCatalogItems = await db.shopCatalogItem.findMany({ where: tidFilter })
+   171→
+   172→  // Stats
+   173→  backup._meta.stats = {
+   174→    tenants: backup.tenants.length,
+   175→    products: backup.products.length,
+   176→    customers: backup.customers.length,
+   177→    salesOrders: backup.salesOrders.length,
+   178→    customFields: backup.customFields.length,
+   179→    customFieldValues: backup.customFieldValues.length,
+   180→    encounterTemplates: backup.encounterTemplates.length,
+   181→    clinicalEncounters: backup.clinicalEncounters.length,
+   182→    invoiceTemplate: backup.invoiceTemplate.length,
+   183→    documentTemplates: backup.documentTemplates.length,
+   184→    statusPipelines: backup.statusPipelines.length,
+   185→    currencies: backup.currencies.length,
+   186→    rewardTasks: backup.rewardTasks.length,
+   187→    partnerShops: backup.partnerShops.length,
+   188→  }
+   189→
+   190→  // Explicitly note that point balances are NOT included (platform-owned)
+   191→  backup._meta.pointsNote = 'ALL Nex Coin data (user balances, company balances, transaction history, redemption codes) is PLATFORM-OWNED and NOT included in this backup. Only reward CONFIGURATION (tasks, shop catalog, settings) is exported. Coin data is controlled by the platform.'
+   192→
+   193→  // Audit
+   194→  for (const tid of tenantIds) {
+   195→    await logAction({
+   196→      ctx: { actorId: user.id, actorEmail: user.email, actorRole: user.role, tenantId: tid },
+   197→      action: 'backup_export',
+   198→      entityType: 'tenant',
+   199→      entityId: tid,
+   200→      summary: `Exported ${isFullBackup ? 'full' : 'tenant'} backup (incl. customization: ${backup._meta.stats.customFields} custom fields, ${backup._meta.stats.encounterTemplates} encounter templates, ${backup._meta.stats.invoiceTemplate} invoice template, ${backup._meta.stats.documentTemplates} document templates)`,
+   201→      metadata: { scope: backup._meta.scope, stats: backup._meta.stats },
+   202→    })
+   203→  }
+   204→
+   205→  if (format === 'csv') {
+   206→    return await renderCsvZip(backup, isFullBackup, tenantIds)
+   207→  }
+   208→
+   209→  const filename = isFullBackup
+   210→    ? `nexus-full-backup-${new Date().toISOString().slice(0, 10)}.json`
+   211→    : `tenant-${tenantIds[0]}-backup-${new Date().toISOString().slice(0, 10)}.json`
+   212→
+   213→  return new NextResponse(JSON.stringify(backup, null, 2), {
+   214→    headers: {
+   215→      'Content-Type': 'application/json',
+   216→      'Content-Disposition': `attachment; filename="${filename}"`,
+   217→    },
+   218→  })
+   219→}
+   220→
+   221→/**
+   222→ * Render the backup as a ZIP archive containing one CSV file per table.
+   223→ * NOTE: User point balances are platform-owned and NOT included.
+   224→ */
+   225→async function renderCsvZip(backup: any, isFullBackup: boolean, tenantIds: string[]) {
+   226→  const JSZip = (await import('jszip')).default
+   227→  const zip = new JSZip()
+   228→
+   229→  const tableNames = Object.keys(backup).filter(k => k !== '_meta')
+   230→  const readmeLines = [
+   231→    `Nexus ERP backup — CSV export`,
+   232→    `Exported at: ${backup._meta.exportedAt}`,
+   233→    `Scope: ${backup._meta.scope}`,
+   234→    ``,
+   235→    `This archive contains ${tableNames.length} CSV files, one per data table.`,
+   236→    `Each file is UTF-8 encoded with a BOM so it opens cleanly in Excel.`,
+   237→    ``,
+   238→    `IMPORTANT — Points ownership:`,
+   239→    `  User point balances are PLATFORM-OWNED and NOT included in this backup.`,
+   240→    `  Only reward configuration (tasks, shop catalog) and transaction history`,
+   241→    `  (point transactions, redemption codes) are exported for audit purposes.`,
+   242→    `  Point balances are controlled by the platform to maintain economy integrity.`,
+   243→    ``,
+   244→    `Tables included:`,
+   245→    ...tableNames.map(n => `  - ${n}.csv  (${Array.isArray(backup[n]) ? backup[n].length : 0} rows)`),
+   246→  ]
+   247→  zip.file('README.txt', readmeLines.join('\r\n'))
+   248→
+   249→  for (const tableName of tableNames) {
+   250→    const rows = backup[tableName]
+   251→    if (!Array.isArray(rows) || rows.length === 0) continue
+   252→    const csv = withBom(recordsToCsv(rows))
+   253→    zip.file(`${tableName}.csv`, csv)
+   254→  }
+   255→
+   256→  const zipBuffer = await zip.generateAsync({
+   257→    type: 'nodebuffer',
+   258→    compression: 'DEFLATE',
+   259→    compressionOptions: { level: 6 },
+   260→  })
+   261→
+   262→  const filename = isFullBackup
+   263→    ? `nexus-full-backup-${new Date().toISOString().slice(0, 10)}.zip`
+   264→    : `tenant-${tenantIds[0]}-backup-${new Date().toISOString().slice(0, 10)}.zip`
+   265→
+   266→  return new NextResponse(zipBuffer, {
+   267→    headers: {
+   268→      'Content-Type': 'application/zip',
+   269→      'Content-Disposition': `attachment; filename="${filename}"`,
+   270→      'Content-Length': String(zipBuffer.length),
+   271→    },
+   272→  })
+   273→}
+   274→
+   275→// POST /api/erp/backup - restore/import tenant data from JSON (includes ALL customization)
+   276→export async function POST(req: NextRequest) {
+   277→  const user = await getCurrentUser()
+   278→  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+   279→  if (!['OWNER', 'TENANT_ADMIN'].includes(user.role)) {
+   280→    return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+   281→  }
+   282→
+   283→  try {
+   284→    const body = await req.json()
+   285→    const targetTenantId = body.targetTenantId || (user.role === 'OWNER' ? null : user.tenantId)
+   286→    const mode: 'insert' | 'upsert' | 'replace' = body.mode || 'upsert'
+   287→
+   288→    if (!targetTenantId) {
+   289→      return NextResponse.json({ error: 'targetTenantId is required' }, { status: 400 })
+   290→    }
+   291→
+   292→    // Determine backup format & reconstruct a unified `backup` object
+   293→    let backup: any
+   294→    if (body.zipBase64) {
+   295→      backup = await reconstructBackupFromZip(body.zipBase64)
+   296→    } else if (body.backup) {
+   297→      backup = body.backup
+   298→    } else {
+   299→      return NextResponse.json({ error: 'Invalid backup file format — expected { backup } or { zipBase64 }' }, { status: 400 })
+   300→    }
+   301→
+   302→    if (!backup || !backup._meta) {
+   303→      return NextResponse.json({ error: 'Invalid backup file format — missing _meta section' }, { status: 400 })
+   304→    }
+   305→
+   306→    const tenant = await db.tenant.findUnique({ where: { id: targetTenantId } })
+   307→    if (!tenant) return NextResponse.json({ error: 'Target tenant not found' }, { status: 404 })
+   308→
+   309→    let imported: any = {
+   310→      products: 0, customers: 0, suppliers: 0, employees: 0, transactions: 0,
+   311→      // Customization
+   312→      customFields: 0, customFieldValues: 0, customTabs: 0, statusPipelines: 0,
+   313→      recordNotes: 0, moduleLabels: 0, fileAttachments: 0,
+   314→      invoiceTemplate: 0, encounterTemplates: 0, clinicalEncounters: 0, documentTemplates: 0,
+   315→      currencies: 0, exchangeRates: 0, duitNowSettings: 0,
+   316→      warehouses: 0, numberSettings: 0, payments: 0,
+   317→      // Track updates/skips for upsert mode
+   318→      updated: { products: 0, customers: 0, suppliers: 0, employees: 0 },
+   319→      skipped: { products: 0, customers: 0, suppliers: 0, employees: 0 },
+   320→      mode,
+   321→      // Explicitly note that points are NOT restored
+   322→      pointsNote: 'User point balances are platform-owned and were NOT restored. Only reward config + transaction history were imported.',
+   323→    }
+   324→
+   325→    // Helper: ensure JSON-stored-as-String fields are strings (for CSV restore)
+   326→    const asStr = (v: any): string | null => {
+   327→      if (v === null || v === undefined) return null
+   328→      if (typeof v === 'string') return v
+   329→      return JSON.stringify(v)
+   330→    }
+   331→
+   332→    // ── Restore customization FIRST (so fields/templates exist before data references them) ──
+   333→
+   334→    // Custom Fields
+   335→    if (backup.customFields) {
+   336→      for (const cf of backup.customFields) {
+   337→        const existing = await db.customField.findUnique({
+   338→          where: { tenantId_module_fieldKey: { tenantId: targetTenantId, module: cf.module, fieldKey: cf.fieldKey } },
+   339→        })
+   340→        if (existing) continue
+   341→        await db.customField.create({
+   342→          data: {
+   343→            tenantId: targetTenantId, module: cf.module, fieldKey: cf.fieldKey,
+   344→            label: cf.label, type: cf.type, options: cf.options, defaultValue: cf.defaultValue,
+   345→            formula: cf.formula, formulaType: cf.formulaType, sourceField: cf.sourceField,
+   346→            isRequired: cf.isRequired, isFilterable: cf.isFilterable,
+   347→            showInTable: cf.showInTable, showInForm: cf.showInForm,
+   348→            sortOrder: cf.sortOrder, isActive: cf.isActive,
+   349→          },
+   350→        })
+   351→        imported.customFields++
+   352→      }
+   353→    }
+   354→
+   355→    // Custom Field Values
+   356→    if (backup.customFieldValues) {
+   357→      for (const cfv of backup.customFieldValues) {
+   358→        // Need to find the customField in the target tenant by fieldKey
+   359→        const sourceCf = backup.customFields?.find((cf: any) => cf.id === cfv.customFieldId)
+   360→        if (!sourceCf) continue
+   361→        const targetCf = await db.customField.findUnique({
+   362→          where: { tenantId_module_fieldKey: { tenantId: targetTenantId, module: sourceCf.module, fieldKey: sourceCf.fieldKey } },
+   363→        })
+   364→        if (!targetCf) continue
+   365→        await db.customFieldValue.upsert({
+   366→          where: { customFieldId_entityId: { customFieldId: targetCf.id, entityId: cfv.entityId } },
+   367→          create: { tenantId: targetTenantId, customFieldId: targetCf.id, entityType: cfv.entityType, entityId: cfv.entityId, value: cfv.value },
+   368→          update: { value: cfv.value },
+   369→        })
+   370→        imported.customFieldValues++
+   371→      }
+   372→    }
+   373→
+   374→    // Encounter Template (upsert — one per tenant)
+   375→    if (backup.encounterTemplates) {
+   376→      for (const et of backup.encounterTemplates) {
+   377→        await db.encounterTemplate.upsert({
+   378→          where: { tenantId: targetTenantId },
+   379→          create: {
+   380→            tenantId: targetTenantId, displayName: et.displayName,
+   381→            sections: et.sections, itemTables: et.itemTables,
+   382→            showAdvice: et.showAdvice, adviceLabel: et.adviceLabel,
+   383→            showFollowUp: et.showFollowUp, followUpLabel: et.followUpLabel,
+   384→            showOnInvoice: et.showOnInvoice,
+   385→            requireEncounterBeforeInvoice: et.requireEncounterBeforeInvoice,
+   386→            requiredSectionIds: et.requiredSectionIds,
+   387→            defaultDepositAmount: et.defaultDepositAmount,
+   388→            defaultDepositLabel: et.defaultDepositLabel,
+   389→          },
+   390→          update: {
+   391→            displayName: et.displayName, sections: et.sections, itemTables: et.itemTables,
+   392→            showAdvice: et.showAdvice, adviceLabel: et.adviceLabel,
+   393→            showFollowUp: et.showFollowUp, followUpLabel: et.followUpLabel,
+   394→            showOnInvoice: et.showOnInvoice,
+   395→            requireEncounterBeforeInvoice: et.requireEncounterBeforeInvoice,
+   396→            requiredSectionIds: et.requiredSectionIds,
+   397→            defaultDepositAmount: et.defaultDepositAmount,
+   398→            defaultDepositLabel: et.defaultDepositLabel,
+   399→          },
+   400→        })
+   401→        imported.encounterTemplates++
+   402→      }
+   403→    }
+   404→
+   405→    // Invoice Template (upsert — one per tenant)
+   406→    if (backup.invoiceTemplate) {
+   407→      for (const it of backup.invoiceTemplate) {
+   408→        await db.invoiceTemplate.upsert({
+   409→          where: { tenantId: targetTenantId },
+   410→          create: {
+   411→            tenantId: targetTenantId, clinicName: it.clinicName, clinicPhone: it.clinicPhone,
+   412→            clinicAddress: it.clinicAddress, invoiceLabel: it.invoiceLabel,
+   413→            showPatientIC: it.showPatientIC, patientICLabel: it.patientICLabel,
+   414→            showClinicalNotes: it.showClinicalNotes,
+   415→            notesLabel: it.notesLabel, issueLabel: it.issueLabel, findingsLabel: it.findingsLabel,
+   416→            diagnosisLabel: it.diagnosisLabel, planLabel: it.planLabel,
+   417→            showItemNumber: it.showItemNumber, itemColLabel: it.itemColLabel,
+   418→            priceColLabel: it.priceColLabel, unitColLabel: it.unitColLabel,
+   419→            amountColLabel: it.amountColLabel, totalLabel: it.totalLabel,
+   420→            currencySymbol: it.currencySymbol, showPaymentQR: it.showPaymentQR,
+   421→            paymentInstructions: it.paymentInstructions, footerText: it.footerText,
+   422→            primaryColor: it.primaryColor, fontSize: it.fontSize,
+   423→            patientCustomFields: it.patientCustomFields,
+   424→          },
+   425→          update: {
+   426→            clinicName: it.clinicName, clinicPhone: it.clinicPhone, clinicAddress: it.clinicAddress,
+   427→            invoiceLabel: it.invoiceLabel, showPatientIC: it.showPatientIC,
+   428→            primaryColor: it.primaryColor, currencySymbol: it.currencySymbol,
+   429→            patientCustomFields: it.patientCustomFields,
+   430→          },
+   431→        })
+   432→        imported.invoiceTemplate++
+   433→      }
+   434→    }
+   435→
+   436→    // Document Templates
+   437→    if (backup.documentTemplates) {
+   438→      for (const dt of backup.documentTemplates) {
+   439→        await db.documentTemplate.upsert({
+   440→          where: { tenantId_docType: { tenantId: targetTenantId, docType: dt.docType } },
+   441→          create: { tenantId: targetTenantId, docType: dt.docType, config: dt.config, isActive: dt.isActive },
+   442→          update: { config: dt.config, isActive: dt.isActive },
+   443→        })
+   444→        imported.documentTemplates++
+   445→      }
+   446→    }
+   447→
+   448→    // Status Pipeline (upsert — one per tenant)
+   449→    if (backup.statusPipelines) {
+   450→      for (const sp of backup.statusPipelines) {
+   451→        await db.statusPipeline.upsert({
+   452→          where: { tenantId: targetTenantId },
+   453→          create: { tenantId: targetTenantId, orderStatuses: sp.orderStatuses, poStatuses: sp.poStatuses, customerStatuses: sp.customerStatuses, employeeStatuses: sp.employeeStatuses },
+   454→          update: { orderStatuses: sp.orderStatuses, poStatuses: sp.poStatuses, customerStatuses: sp.customerStatuses, employeeStatuses: sp.employeeStatuses },
+   455→        })
+   456→        imported.statusPipelines++
+   457→      }
+   458→    }
+   459→
+   460→    // Module Labels
+   461→    if (backup.moduleLabels) {
+   462→      for (const ml of backup.moduleLabels) {
+   463→        await db.moduleLabel.upsert({
+   464→          where: { tenantId_moduleKey: { tenantId: targetTenantId, moduleKey: ml.moduleKey } },
+   465→          create: { tenantId: targetTenantId, moduleKey: ml.moduleKey, label: ml.label, description: ml.description },
+   466→          update: { label: ml.label, description: ml.description },
+   467→        })
+   468→        imported.moduleLabels++
+   469→      }
+   470→    }
+   471→
+   472→    // Custom Tabs
+   473→    if (backup.customTabs) {
+   474→      for (const ct of backup.customTabs) {
+   475→        await db.customTab.create({ data: { tenantId: targetTenantId, module: ct.module, label: ct.label, content: ct.content, sortOrder: ct.sortOrder, isActive: ct.isActive } })
+   476→        imported.customTabs++
+   477→      }
+   478→    }
+   479→
+   480→    // Currencies
+   481→    if (backup.currencies) {
+   482→      for (const c of backup.currencies) {
+   483→        const existing = await db.currency.findUnique({ where: { tenantId_code: { tenantId: targetTenantId, code: c.code } } })
+   484→        if (existing) {
+   485→          await db.currency.update({ where: { id: existing.id }, data: { isBase: c.isBase, isActive: c.isActive, name: c.name, symbol: c.symbol } })
+   486→        } else {
+   487→          await db.currency.create({ data: { tenantId: targetTenantId, code: c.code, name: c.name, symbol: c.symbol, isBase: c.isBase, isActive: c.isActive } })
+   488→          imported.currencies++
+   489→        }
+   490→      }
+   491→    }
+   492→
+   493→    // Warehouses
+   494→    if (backup.warehouses) {
+   495→      for (const w of backup.warehouses) {
+   496→        const existing = await db.warehouse.findUnique({ where: { tenantId_code: { tenantId: targetTenantId, code: w.code } } })
+   497→        if (existing) continue
+   498→        await db.warehouse.create({ data: { tenantId: targetTenantId, code: w.code, name: w.name, address: w.address, isDefault: w.isDefault, isActive: w.isActive !== undefined ? w.isActive : true } })
+   499→        imported.warehouses++
+   500→      }
+   501→    }
+   502→
+   503→    // Number Settings
+   504→    if (backup.numberSettings) {
+   505→      for (const ns of backup.numberSettings) {
+   506→        await db.tenantNumberSetting.upsert({
+   507→          where: { tenantId: targetTenantId },
+   508→          create: { tenantId: targetTenantId, productPrefix: ns.productPrefix, salesOrderPrefix: ns.salesOrderPrefix, poPrefix: ns.poPrefix, customerPrefix: ns.customerPrefix, employeePrefix: ns.employeePrefix },
+   509→          update: { productPrefix: ns.productPrefix, salesOrderPrefix: ns.salesOrderPrefix, poPrefix: ns.poPrefix },
+   510→        })
+   511→        imported.numberSettings++
+   512→      }
+   513→    }
+   514→
+   515→    // ── Restore core business data ──
+   516→
+   517→    // Products (with packSize, productType, etc.)
+   518→    if (backup.products) {
+   519→      for (const p of backup.products) {
+   520→        const existing = await db.product.findUnique({ where: { tenantId_sku: { tenantId: targetTenantId, sku: p.sku } } })
+   521→        if (existing) continue
+   522→        await db.product.create({
+   523→          data: {
+   524→            tenantId: targetTenantId, sku: p.sku, name: p.name, category: p.category,
+   525→            price: p.price, cost: p.cost, stockQty: p.stockQty, reorderLevel: p.reorderLevel,
+   526→            reorderQty: p.reorderQty || 50, warehouse: p.warehouse, warehouseId: p.warehouseId,
+   527→            supplierId: null, productType: p.productType || 'physical',
+   528→            packSize: p.packSize, packUnit: p.packUnit, baseUnit: p.baseUnit,
+   529→          },
+   530→        })
+   531→        imported.products++
+   532→      }
+   533→    }
+   534→
+   535→    // Customers (with all CRM fields)
+   536→    if (backup.customers) {
+   537→      for (const c of backup.customers) {
+   538→        const existing = await db.customer.findUnique({ where: { tenantId_email: { tenantId: targetTenantId, email: c.email } } })
+   539→        if (existing) continue
+   540→        await db.customer.create({
+   541→          data: {
+   542→            tenantId: targetTenantId, name: c.name, email: c.email, phone: c.phone,
+   543→            company: c.company, status: c.status, totalSpent: c.totalSpent || 0,
+   544→            dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth) : null,
+   545→            gender: c.gender, idType: c.idType, idNumber: c.idNumber,
+   546→            nationality: c.nationality, occupation: c.occupation,
+   547→            lifecycleStage: c.lifecycleStage, leadSource: c.leadSource,
+   548→            ownerId: c.ownerId, tags: c.tags, lastContactAt: c.lastContactAt ? new Date(c.lastContactAt) : null,
+   549→          },
+   550→        })
+   551→        imported.customers++
+   552→      }
+   553→    }
+   554→
+   555→    // Suppliers
+   556→    if (backup.suppliers) {
+   557→      for (const s of backup.suppliers) {
+   558→        const existing = await db.supplier.findUnique({ where: { tenantId_name: { tenantId: targetTenantId, name: s.name } } })
+   559→        if (existing) continue
+   560→        await db.supplier.create({ data: { tenantId: targetTenantId, name: s.name, contactName: s.contactName, email: s.email, phone: s.phone, country: s.country, rating: s.rating } })
+   561→        imported.suppliers++
+   562→      }
+   563→    }
+   564→
+   565→    // Employees
+   566→    if (backup.employees) {
+   567→      for (const e of backup.employees) {
+   568→        await db.employee.create({ data: { tenantId: targetTenantId, name: e.name, email: e.email, department: e.department, role: e.role, salary: e.salary, hireDate: new Date(e.hireDate), status: e.status } })
+   569→        imported.employees++
+   570→      }
+   571→    }
+   572→
+   573→    // Transactions
+   574→    if (backup.transactions) {
+   575→      for (const t of backup.transactions) {
+   576→        await db.transaction.create({ data: { tenantId: targetTenantId, type: t.type, category: t.category, amount: t.amount, description: t.description, date: new Date(t.date), refType: t.refType, refId: null } })
+   577→        imported.transactions++
+   578→      }
+   579→    }
+   580→
+   581→    // ── Restore rewards CONFIG (not balances — those are platform-owned) ──
+   582→    // Reward config, tasks, partner shops, catalog items = tenant-owned configuration
+   583→    if (backup.rewardConfig) {
+   584→      for (const rc of backup.rewardConfig) {
+   585→        await db.rewardConfig.upsert({
+   586→          where: { tenantId: targetTenantId },
+   587→          create: { tenantId: targetTenantId, isEnabled: rc.isEnabled, pointsPerVisit: rc.pointsPerVisit, pointsLabel: rc.pointsLabel, shopName: rc.shopName },
+   588→          update: { isEnabled: rc.isEnabled, pointsPerVisit: rc.pointsPerVisit, pointsLabel: rc.pointsLabel, shopName: rc.shopName },
+   589→        })
+   590→      }
+   591→    }
+   592→    if (backup.rewardTasks) {
+   593→      for (const rt of backup.rewardTasks) {
+   594→        const existing = await db.rewardTask.findFirst({ where: { tenantId: targetTenantId, name: rt.name } })
+   595→        if (existing) {
+   596→          if (mode === 'upsert' || mode === 'replace') {
+   597→            await db.rewardTask.update({ where: { id: existing.id }, data: { points: rt.points, description: rt.description, triggerType: rt.triggerType, isActive: rt.isActive } })
+   598→          }
+   599→        } else {
+   600→          await db.rewardTask.create({ data: { tenantId: targetTenantId, name: rt.name, description: rt.description, points: rt.points, triggerType: rt.triggerType, isActive: rt.isActive } })
+   601→        }
+   602→      }
+   603→    }
+   604→    if (backup.partnerShops) {
+   605→      for (const ps of backup.partnerShops) {
+   606→        const existing = await db.partnerShop.findFirst({ where: { tenantId: targetTenantId, name: ps.name } })
+   607→        if (!existing) {
+   608→          // Only restore if the shop owner exists in this tenant
+   609→          const owner = await db.user.findFirst({ where: { tenantId: targetTenantId, email: ps.ownerEmail || '' } })
+   610→          if (owner) {
+   611→            await db.partnerShop.create({ data: { tenantId: targetTenantId, name: ps.name, description: ps.description, category: ps.category, ownerUserId: owner.id, isGlobal: ps.isGlobal, isActive: ps.isActive } })
+   612→          }
+   613→        }
+   614→      }
+   615→    }
+   616→    if (backup.shopCatalogItems) {
+   617→      for (const item of backup.shopCatalogItems) {
+   618→        // Find the shop by name in the target tenant (IDs won't match)
+   619→        const sourceShop = backup.partnerShops?.find((s: any) => s.id === item.shopId)
+   620→        if (!sourceShop) continue
+   621→        const targetShop = await db.partnerShop.findFirst({ where: { tenantId: targetTenantId, name: sourceShop.name } })
+   622→        if (!targetShop) continue
+   623→        const existing = await db.shopCatalogItem.findFirst({ where: { shopId: targetShop.id, name: item.name } })
+   624→        if (!existing) {
+   625→          await db.shopCatalogItem.create({ data: { tenantId: targetTenantId, shopId: targetShop.id, name: item.name, description: item.description, rewardType: item.rewardType, rewardDetails: item.rewardDetails, pointsCost: item.pointsCost, imageUrl: item.imageUrl, stock: item.stock, isActive: item.isActive } })
+   626→        }
+   627→      }
+   628→    }
+   629→    // NOTE: pointTransactions, redemptionCodes, and nexCoins are NEVER restored.
+   630→    // All Nex Coin data is platform-owned — tenants cannot import coin history.
+   631→
+   632→    await logAction({
+   633→      ctx: { actorId: user.id, actorEmail: user.email, actorRole: user.role, tenantId: targetTenantId },
+   634→      action: 'backup_import',
+   635→      entityType: 'tenant',
+   636→      entityId: targetTenantId,
+   637→      summary: `Imported backup into "${tenant.name}" (mode: ${mode}): ${imported.products} products, ${imported.customers} customers, reward config + ${backup.rewardTasks?.length || 0} tasks. No Nex Coin data imported (platform-owned).`,
+   638→      metadata: { imported, source: backup._meta, mode },
+   639→    })
+   640→
+   641→    return NextResponse.json({ ok: true, imported })
+   642→  } catch (e: any) {
+   643→    console.error('Restore backup error:', e?.message)
+   644→    return NextResponse.json({ error: 'Server error', detail: e?.message }, { status: 500 })
+   645→  }
+   646→}
+   647→
+   648→/**
+   649→ * Reconstruct a backup object from a base64-encoded ZIP of CSV files.
+   650→ * Returns an object shaped like the JSON backup so the downstream restore
+   651→ * logic doesn't need to care which format was uploaded.
+   652→ */
+   653→async function reconstructBackupFromZip(zipBase64: string): Promise<any> {
+   654→  const JSZip = (await import('jszip')).default
+   655→
+   656→  const b64 = zipBase64.replace(/^data:application\/zip;base64,/, '').replace(/^data:;base64,/, '')
+   657→  const zipBuffer = Buffer.from(b64, 'base64')
+   658→  const zip = await JSZip.loadAsync(zipBuffer)
+   659→
+   660→  const backup: any = { _meta: { version: '2.0', format: 'csv-zip' } }
+   661→
+   662→  // Parse README.txt for _meta fields
+   663→  const readmeFile = zip.file('README.txt')
+   664→  if (readmeFile) {
+   665→    let readme = await readmeFile.async('string')
+   666→    if (readme.charCodeAt(0) === 0xfeff) readme = readme.slice(1)
+   667→    const m = {
+   668→      exportedAt: readme.match(/Exported at:\s*(.+)/),
+   669→      scope: readme.match(/Scope:\s*(.+)/),
+   670→    }
+   671→    if (m.exportedAt) backup._meta.exportedAt = m.exportedAt[1].trim()
+   672→    if (m.scope) backup._meta.scope = m.scope[1].trim()
+   673→  }
+   674→
+   675→  // Parse every CSV file into the backup object
+   676→  const csvFiles = Object.keys(zip.files).filter(name =>
+   677→    name.endsWith('.csv') && !zip.files[name].dir
+   678→  )
+   679→
+   680→  for (const filename of csvFiles) {
+   681→    const tableName = filename.replace(/\.csv$/, '')
+   682→    const file = zip.files[filename]
+   683→    const csvText = await file.async('string')
+   684→    backup[tableName] = parseCsv(csvText)
+   685→  }
+   686→
+   687→  backup._meta.stats = {
+   688→    tenants: backup.tenants?.length || 0,
+   689→    products: backup.products?.length || 0,
+   690→    customers: backup.customers?.length || 0,
+   691→  }
+   692→
+   693→  return backup
+   694→}
+   695→

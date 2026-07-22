@@ -1,0 +1,650 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect } from 'react'
+     4→     4→import {
+     5→     5→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+     6→     6→} from '@/components/ui/dialog'
+     7→     7→import { Button } from '@/components/ui/button'
+     8→     8→import { Input } from '@/components/ui/input'
+     9→     9→import { Label } from '@/components/ui/label'
+    10→    10→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    11→    11→import { Loader2, Plus, Trash2, AlertCircle } from 'lucide-react'
+    12→    12→import { Alert, AlertDescription } from '@/components/ui/alert'
+    13→    13→
+    14→    14→// ============ Shared helpers ============
+    15→    15→function Field({ label, children }: { label: string; children: React.ReactNode }) {
+    16→    16→  return (
+    17→    17→    <div className="space-y-1.5">
+    18→    18→      <Label className="text-xs">{label}</Label>
+    19→    19→      {children}
+    20→    20→    </div>
+    21→    21→  )
+    22→    22→}
+    23→    23→
+    24→    24→function ErrorAlert({ error }: { error: string }) {
+    25→    25→  if (!error) return null
+    26→    26→  return (
+    27→    27→    <Alert variant="destructive">
+    28→    28→      <AlertCircle className="h-4 w-4" />
+    29→    29→      <AlertDescription>{error}</AlertDescription>
+    30→    30→    </Alert>
+    31→    31→  )
+    32→    32→}
+    33→    33→
+    34→    34→// ============ Product Form ============
+    35→    35→export function ProductForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+    36→    36→  const [loading, setLoading] = useState(false)
+    37→    37→  const [error, setError] = useState('')
+    38→    38→  const [suppliers, setSuppliers] = useState<any[]>([])
+    39→    39→  const [nextSku, setNextSku] = useState('')
+    40→    40→  const [saveAndNew, setSaveAndNew] = useState(false)
+    41→    41→  const [form, setForm] = useState({
+    42→    42→    name: '', sku: '', category: 'Electronics', price: '', cost: '',
+    43→    43→    stockQty: '0', reorderLevel: '10', warehouse: 'WH-Central', supplierId: '',
+    44→    44→  })
+    45→    45→
+    46→    46→  useEffect(() => {
+    47→    47→    if (open) {
+    48→    48→      fetch('/api/erp/suppliers').then(r => r.json()).then(d => setSuppliers(d.suppliers || []))
+    49→    49→      // Fetch next SKU preview from numbering settings
+    50→    50→      fetch('/api/erp/numbering').then(r => r.json()).then(d => {
+    51→    51→        if (d.previews?.product) {
+    52→    52→          setNextSku(d.previews.product)
+    53→    53→          setForm(f => ({ ...f, sku: d.previews.product }))
+    54→    54→        }
+    55→    55→      })
+    56→    56→    }
+    57→    57→  }, [open])
+    58→    58→
+    59→    59→  async function submit(e: React.FormEvent) {
+    60→    60→    e.preventDefault()
+    61→    61→    setLoading(true); setError('')
+    62→    62→    try {
+    63→    63→      const res = await fetch('/api/erp/products', {
+    64→    64→        method: 'POST',
+    65→    65→        headers: { 'Content-Type': 'application/json' },
+    66→    66→        body: JSON.stringify(form),
+    67→    67→      })
+    68→    68→      const data = await res.json()
+    69→    69→      if (!res.ok) throw new Error(data.error || 'Failed')
+    70→    70→      onCreated()
+    71→    71→      if (saveAndNew) {
+    72→    72→        // Reset form but keep it open for the next product
+    73→    73→        setForm({ name: '', sku: '', category: form.category, price: '', cost: '', stockQty: '0', reorderLevel: '10', warehouse: form.warehouse, supplierId: '' })
+    74→    74→        setSaveAndNew(false)
+    75→    75→        // Fetch next SKU for the new product
+    76→    76→        fetch('/api/erp/numbering').then(r => r.json()).then(d => {
+    77→    77→          if (d.previews?.product) {
+    78→    78→            setNextSku(d.previews.product)
+    79→    79→            setForm(f => ({ ...f, sku: d.previews.product }))
+    80→    80→          }
+    81→    81→        })
+    82→    82→      } else {
+    83→    83→        onClose()
+    84→    84→        setForm({ name: '', sku: '', category: 'Electronics', price: '', cost: '', stockQty: '0', reorderLevel: '10', warehouse: 'WH-Central', supplierId: '' })
+    85→    85→      }
+    86→    86→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+    87→    87→  }
+    88→    88→
+    89→    89→  return (
+    90→    90→    <Dialog open={open} onOpenChange={onClose}>
+    91→    91→      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    92→    92→        <DialogHeader>
+    93→    93→          <DialogTitle>Add New Product</DialogTitle>
+    94→    94→          <DialogDescription>Create a new inventory item. It will be available in sales orders and purchase orders.</DialogDescription>
+    95→    95→        </DialogHeader>
+    96→    96→        <form onSubmit={submit} className="space-y-4">
+    97→    97→          <div className="grid grid-cols-2 gap-3">
+    98→    98→            <Field label="Product Name *"><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Wireless Headphones" autoFocus /></Field>
+    99→    99→            <Field label="SKU * (auto-generated)">
+   100→   100→              <div className="flex gap-2">
+   101→   101→                <Input required value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value.toUpperCase() })} className="font-mono" />
+   102→   102→                {nextSku && (
+   103→   103→                  <Button type="button" variant="outline" size="sm" title="Reset to auto-generated" onClick={() => setForm({ ...form, sku: nextSku })}>
+   104→   104→                    Auto
+   105→   105→                  </Button>
+   106→   106→                )}
+   107→   107→              </div>
+   108→   108→            </Field>
+   109→   109→            <Field label="Category *">
+   110→   110→              <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
+   111→   111→                <SelectTrigger><SelectValue /></SelectTrigger>
+   112→   112→                <SelectContent>
+   113→   113→                  {['Electronics', 'Furniture', 'Office Supplies', 'Software'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+   114→   114→                </SelectContent>
+   115→   115→              </Select>
+   116→   116→            </Field>
+   117→   117→            <Field label="Supplier">
+   118→   118→              <Select value={form.supplierId || '__none__'} onValueChange={v => setForm({ ...form, supplierId: v === '__none__' ? '' : v })}>
+   119→   119→                <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+   120→   120→                <SelectContent>
+   121→   121→                  <SelectItem value="__none__">— None —</SelectItem>
+   122→   122→                  {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+   123→   123→                </SelectContent>
+   124→   124→              </Select>
+   125→   125→            </Field>
+   126→   126→            <Field label="Price ($) *"><Input required type="number" step="0.01" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} placeholder="0.00" /></Field>
+   127→   127→            <Field label="Cost ($) *"><Input required type="number" step="0.01" value={form.cost} onChange={e => setForm({ ...form, cost: e.target.value })} placeholder="0.00" /></Field>
+   128→   128→            <Field label="Stock Qty"><Input type="number" value={form.stockQty} onChange={e => setForm({ ...form, stockQty: e.target.value })} /></Field>
+   129→   129→            <Field label="Reorder Level"><Input type="number" value={form.reorderLevel} onChange={e => setForm({ ...form, reorderLevel: e.target.value })} /></Field>
+   130→   130→            <Field label="Warehouse">
+   131→   131→              <Select value={form.warehouse} onValueChange={v => setForm({ ...form, warehouse: v })}>
+   132→   132→                <SelectTrigger><SelectValue /></SelectTrigger>
+   133→   133→                <SelectContent>
+   134→   134→                  {['WH-North', 'WH-South', 'WH-Central'].map(w => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+   135→   135→                </SelectContent>
+   136→   136→              </Select>
+   137→   137→            </Field>
+   138→   138→          </div>
+   139→   139→          <ErrorAlert error={error} />
+   140→   140→          <DialogFooter>
+   141→   141→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   142→   142→            <Button type="submit" variant="outline" disabled={loading} onClick={() => setSaveAndNew(true)}>
+   143→   143→              {loading && saveAndNew ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+   144→   144→              Save & New
+   145→   145→            </Button>
+   146→   146→            <Button type="submit" disabled={loading}>{loading && !saveAndNew ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}Add Product</Button>
+   147→   147→          </DialogFooter>
+   148→   148→        </form>
+   149→   149→      </DialogContent>
+   150→   150→    </Dialog>
+   151→   151→  )
+   152→   152→}
+   153→   153→
+   154→   154→// ============ Customer Form ============
+   155→   155→export function CustomerForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   156→   156→  const [loading, setLoading] = useState(false)
+   157→   157→  const [error, setError] = useState('')
+   158→   158→  const [form, setForm] = useState({ name: '', email: '', phone: '', company: '', status: 'lead' })
+   159→   159→
+   160→   160→  async function submit(e: React.FormEvent) {
+   161→   161→    e.preventDefault()
+   162→   162→    setLoading(true); setError('')
+   163→   163→    try {
+   164→   164→      const res = await fetch('/api/erp/customers', {
+   165→   165→        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+   166→   166→      })
+   167→   167→      const data = await res.json()
+   168→   168→      if (!res.ok) throw new Error(data.error || 'Failed')
+   169→   169→      onCreated(); onClose()
+   170→   170→      setForm({ name: '', email: '', phone: '', company: '', status: 'lead' })
+   171→   171→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   172→   172→  }
+   173→   173→
+   174→   174→  return (
+   175→   175→    <Dialog open={open} onOpenChange={onClose}>
+   176→   176→      <DialogContent>
+   177→   177→        <DialogHeader>
+   178→   178→          <DialogTitle>Add New Customer</DialogTitle>
+   179→   179→          <DialogDescription>Create a new CRM contact. It will appear in the Sales Order customer dropdown.</DialogDescription>
+   180→   180→        </DialogHeader>
+   181→   181→        <form onSubmit={submit} className="space-y-4">
+   182→   182→          <div className="grid grid-cols-2 gap-3">
+   183→   183→            <Field label="Contact Name *"><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+   184→   184→            <Field label="Company *"><Input required value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} /></Field>
+   185→   185→            <Field label="Email *"><Input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+   186→   186→            <Field label="Phone"><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+   187→   187→            <Field label="Status">
+   188→   188→              <Select value={form.status} onValueChange={v => setForm({ ...form, status: v })}>
+   189→   189→                <SelectTrigger><SelectValue /></SelectTrigger>
+   190→   190→                <SelectContent>
+   191→   191→                  <SelectItem value="lead">Lead</SelectItem>
+   192→   192→                  <SelectItem value="active">Active</SelectItem>
+   193→   193→                  <SelectItem value="inactive">Inactive</SelectItem>
+   194→   194→                </SelectContent>
+   195→   195→              </Select>
+   196→   196→            </Field>
+   197→   197→          </div>
+   198→   198→          <ErrorAlert error={error} />
+   199→   199→          <DialogFooter>
+   200→   200→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   201→   201→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add Customer</Button>
+   202→   202→          </DialogFooter>
+   203→   203→        </form>
+   204→   204→      </DialogContent>
+   205→   205→    </Dialog>
+   206→   206→  )
+   207→   207→}
+   208→   208→
+   209→   209→// ============ Supplier Form ============
+   210→   210→export function SupplierForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   211→   211→  const [loading, setLoading] = useState(false)
+   212→   212→  const [error, setError] = useState('')
+   213→   213→  const [form, setForm] = useState({ name: '', contactName: '', email: '', phone: '', country: '', rating: '3' })
+   214→   214→
+   215→   215→  async function submit(e: React.FormEvent) {
+   216→   216→    e.preventDefault()
+   217→   217→    setLoading(true); setError('')
+   218→   218→    try {
+   219→   219→      const res = await fetch('/api/erp/suppliers', {
+   220→   220→        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+   221→   221→      })
+   222→   222→      const data = await res.json()
+   223→   223→      if (!res.ok) throw new Error(data.error || 'Failed')
+   224→   224→      onCreated(); onClose()
+   225→   225→      setForm({ name: '', contactName: '', email: '', phone: '', country: '', rating: '3' })
+   226→   226→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   227→   227→  }
+   228→   228→
+   229→   229→  return (
+   230→   230→    <Dialog open={open} onOpenChange={onClose}>
+   231→   231→      <DialogContent>
+   232→   232→        <DialogHeader>
+   233→   233→          <DialogTitle>Add New Supplier</DialogTitle>
+   234→   234→          <DialogDescription>Register a new supplier. It will appear in the Purchase Order supplier dropdown and Product form.</DialogDescription>
+   235→   235→        </DialogHeader>
+   236→   236→        <form onSubmit={submit} className="space-y-4">
+   237→   237→          <div className="grid grid-cols-2 gap-3">
+   238→   238→            <Field label="Supplier Name *"><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+   239→   239→            <Field label="Contact Name *"><Input required value={form.contactName} onChange={e => setForm({ ...form, contactName: e.target.value })} /></Field>
+   240→   240→            <Field label="Email *"><Input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+   241→   241→            <Field label="Phone"><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+   242→   242→            <Field label="Country"><Input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} placeholder="e.g. USA" /></Field>
+   243→   243→            <Field label="Rating">
+   244→   244→              <Select value={form.rating} onValueChange={v => setForm({ ...form, rating: v })}>
+   245→   245→                <SelectTrigger><SelectValue /></SelectTrigger>
+   246→   246→                <SelectContent>
+   247→   247→                  {[1, 2, 3, 4, 5].map(r => <SelectItem key={r} value={String(r)}>{r} star{r > 1 ? 's' : ''}</SelectItem>)}
+   248→   248→                </SelectContent>
+   249→   249→              </Select>
+   250→   250→            </Field>
+   251→   251→          </div>
+   252→   252→          <ErrorAlert error={error} />
+   253→   253→          <DialogFooter>
+   254→   254→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   255→   255→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add Supplier</Button>
+   256→   256→          </DialogFooter>
+   257→   257→        </form>
+   258→   258→      </DialogContent>
+   259→   259→    </Dialog>
+   260→   260→  )
+   261→   261→}
+   262→   262→
+   263→   263→// ============ Sales Order Form (with line items) ============
+   264→   264→export function SalesOrderForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   265→   265→  const [loading, setLoading] = useState(false)
+   266→   266→  const [error, setError] = useState('')
+   267→   267→  const [customers, setCustomers] = useState<any[]>([])
+   268→   268→  const [products, setProducts] = useState<any[]>([])
+   269→   269→  const [customerId, setCustomerId] = useState('')
+   270→   270→  const [status, setStatus] = useState('pending')
+   271→   271→  const [items, setItems] = useState<{ productId: string; qty: string }[]>([{ productId: '', qty: '1' }])
+   272→   272→  const [nextOrderNumber, setNextOrderNumber] = useState('')
+   273→   273→
+   274→   274→  useEffect(() => {
+   275→   275→    if (open) {
+   276→   276→      fetch('/api/erp/customers').then(r => r.json()).then(d => setCustomers(d.customers || []))
+   277→   277→      fetch('/api/erp/products').then(r => r.json()).then(d => setProducts(d.products || []))
+   278→   278→      fetch('/api/erp/numbering').then(r => r.json()).then(d => {
+   279→   279→        if (d.previews?.salesOrder) setNextOrderNumber(d.previews.salesOrder)
+   280→   280→      })
+   281→   281→    }
+   282→   282→  }, [open])
+   283→   283→
+   284→   284→  const total = items.reduce((s, it) => {
+   285→   285→    const p = products.find(p => p.id === it.productId)
+   286→   286→    return s + (p ? p.price * (parseInt(it.qty) || 0) : 0)
+   287→   287→  }, 0)
+   288→   288→
+   289→   289→  function addItem() { setItems([...items, { productId: '', qty: '1' }]) }
+   290→   290→  function removeItem(i: number) { setItems(items.filter((_, idx) => idx !== i)) }
+   291→   291→  function updateItem(i: number, field: 'productId' | 'qty', value: string) {
+   292→   292→    setItems(items.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
+   293→   293→  }
+   294→   294→
+   295→   295→  async function submit(e: React.FormEvent) {
+   296→   296→    e.preventDefault()
+   297→   297→    setLoading(true); setError('')
+   298→   298→    try {
+   299→   299→      if (!customerId) throw new Error('Select a customer')
+   300→   300→      if (items.some(it => !it.productId)) throw new Error('All line items must have a product')
+   301→   301→      const res = await fetch('/api/erp/orders', {
+   302→   302→        method: 'POST', headers: { 'Content-Type': 'application/json' },
+   303→   303→        body: JSON.stringify({ customerId, status, items }),
+   304→   304→      })
+   305→   305→      const data = await res.json()
+   306→   306→      if (!res.ok) throw new Error(data.error || 'Failed')
+   307→   307→      onCreated(); onClose()
+   308→   308→      setCustomerId(''); setStatus('pending'); setItems([{ productId: '', qty: '1' }])
+   309→   309→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   310→   310→  }
+   311→   311→
+   312→   312→  return (
+   313→   313→    <Dialog open={open} onOpenChange={onClose}>
+   314→   314→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+   315→   315→        <DialogHeader>
+   316→   316→          <DialogTitle>Create Sales Order {nextOrderNumber && <span className="text-muted-foreground font-mono text-sm ml-2">#{nextOrderNumber}</span>}</DialogTitle>
+   317→   317→          <DialogDescription>Select a customer and add line items. Total is calculated from current product prices.</DialogDescription>
+   318→   318→        </DialogHeader>
+   319→   319→        <form onSubmit={submit} className="space-y-4">
+   320→   320→          <div className="grid grid-cols-2 gap-3">
+   321→   321→            <Field label="Customer *">
+   322→   322→              <Select value={customerId} onValueChange={setCustomerId}>
+   323→   323→                <SelectTrigger><SelectValue placeholder="Select customer" /></SelectTrigger>
+   324→   324→                <SelectContent>
+   325→   325→                  {customers.map(c => <SelectItem key={c.id} value={c.id}>{c.company} — {c.name}</SelectItem>)}
+   326→   326→                </SelectContent>
+   327→   327→              </Select>
+   328→   328→            </Field>
+   329→   329→            <Field label="Status">
+   330→   330→              <Select value={status} onValueChange={setStatus}>
+   331→   331→                <SelectTrigger><SelectValue /></SelectTrigger>
+   332→   332→                <SelectContent>
+   333→   333→                  {['pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   334→   334→                </SelectContent>
+   335→   335→              </Select>
+   336→   336→            </Field>
+   337→   337→          </div>
+   338→   338→
+   339→   339→          <div>
+   340→   340→            <div className="flex items-center justify-between mb-2">
+   341→   341→              <Label>Line Items</Label>
+   342→   342→              <Button type="button" size="sm" variant="outline" onClick={addItem}><Plus className="h-3 w-3 mr-1" /> Add Item</Button>
+   343→   343→            </div>
+   344→   344→            <div className="space-y-2">
+   345→   345→              {items.map((it, i) => {
+   346→   346→                const p = products.find(p => p.id === it.productId)
+   347→   347→                return (
+   348→   348→                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
+   349→   349→                    <div className="col-span-7">
+   350→   350→                      <Select value={it.productId} onValueChange={v => updateItem(i, 'productId', v)}>
+   351→   351→                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+   352→   352→                        <SelectContent>
+   353→   353→                          {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} — ${p.price} ({p.stockQty} in stock)</SelectItem>)}
+   354→   354→                        </SelectContent>
+   355→   355→                      </Select>
+   356→   356→                    </div>
+   357→   357→                    <div className="col-span-3">
+   358→   358→                      <Input type="number" min="1" value={it.qty} onChange={e => updateItem(i, 'qty', e.target.value)} placeholder="Qty" />
+   359→   359→                    </div>
+   360→   360→                    <div className="col-span-1 text-right text-sm font-medium tabular-nums">
+   361→   361→                      ${p ? (p.price * (parseInt(it.qty) || 0)).toFixed(0) : '—'}
+   362→   362→                    </div>
+   363→   363→                    <div className="col-span-1">
+   364→   364→                      {items.length > 1 && (
+   365→   365→                        <Button type="button" size="icon" variant="ghost" onClick={() => removeItem(i)} className="h-8 w-8 text-rose-500">
+   366→   366→                          <Trash2 className="h-3.5 w-3.5" />
+   367→   367→                        </Button>
+   368→   368→                      )}
+   369→   369→                    </div>
+   370→   370→                  </div>
+   371→   371→                )
+   372→   372→              })}
+   373→   373→            </div>
+   374→   374→          </div>
+   375→   375→
+   376→   376→          <div className="flex items-center justify-between pt-3 border-t">
+   377→   377→            <span className="text-sm text-muted-foreground">Order Total</span>
+   378→   378→            <span className="text-xl font-bold tabular-nums">${total.toFixed(2)}</span>
+   379→   379→          </div>
+   380→   380→
+   381→   381→          <ErrorAlert error={error} />
+   382→   382→          <DialogFooter>
+   383→   383→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   384→   384→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Create Order</Button>
+   385→   385→          </DialogFooter>
+   386→   386→        </form>
+   387→   387→      </DialogContent>
+   388→   388→    </Dialog>
+   389→   389→  )
+   390→   390→}
+   391→   391→
+   392→   392→// ============ Purchase Order Form (with line items) ============
+   393→   393→export function PurchaseOrderForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   394→   394→  const [loading, setLoading] = useState(false)
+   395→   395→  const [error, setError] = useState('')
+   396→   396→  const [suppliers, setSuppliers] = useState<any[]>([])
+   397→   397→  const [products, setProducts] = useState<any[]>([])
+   398→   398→  const [supplierId, setSupplierId] = useState('')
+   399→   399→  const [status, setStatus] = useState('draft')
+   400→   400→  const [items, setItems] = useState<{ productId: string; qty: string }[]>([{ productId: '', qty: '20' }])
+   401→   401→
+   402→   402→  useEffect(() => {
+   403→   403→    if (open) {
+   404→   404→      fetch('/api/erp/suppliers').then(r => r.json()).then(d => setSuppliers(d.suppliers || []))
+   405→   405→      fetch('/api/erp/products').then(r => r.json()).then(d => setProducts(d.products || []))
+   406→   406→    }
+   407→   407→  }, [open])
+   408→   408→
+   409→   409→  const total = items.reduce((s, it) => {
+   410→   410→    const p = products.find(p => p.id === it.productId)
+   411→   411→    return s + (p ? p.cost * (parseInt(it.qty) || 0) : 0)
+   412→   412→  }, 0)
+   413→   413→
+   414→   414→  function addItem() { setItems([...items, { productId: '', qty: '20' }]) }
+   415→   415→  function removeItem(i: number) { setItems(items.filter((_, idx) => idx !== i)) }
+   416→   416→  function updateItem(i: number, field: 'productId' | 'qty', value: string) {
+   417→   417→    setItems(items.map((it, idx) => idx === i ? { ...it, [field]: value } : it))
+   418→   418→  }
+   419→   419→
+   420→   420→  async function submit(e: React.FormEvent) {
+   421→   421→    e.preventDefault()
+   422→   422→    setLoading(true); setError('')
+   423→   423→    try {
+   424→   424→      if (!supplierId) throw new Error('Select a supplier')
+   425→   425→      if (items.some(it => !it.productId)) throw new Error('All line items must have a product')
+   426→   426→      const res = await fetch('/api/erp/purchase-orders', {
+   427→   427→        method: 'POST', headers: { 'Content-Type': 'application/json' },
+   428→   428→        body: JSON.stringify({ supplierId, status, items }),
+   429→   429→      })
+   430→   430→      const data = await res.json()
+   431→   431→      if (!res.ok) throw new Error(data.error || 'Failed')
+   432→   432→      onCreated(); onClose()
+   433→   433→      setSupplierId(''); setStatus('draft'); setItems([{ productId: '', qty: '20' }])
+   434→   434→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   435→   435→  }
+   436→   436→
+   437→   437→  return (
+   438→   438→    <Dialog open={open} onOpenChange={onClose}>
+   439→   439→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+   440→   440→        <DialogHeader>
+   441→   441→          <DialogTitle>Create Purchase Order</DialogTitle>
+   442→   442→          <DialogDescription>Select a supplier and add products to restock. Total is calculated from product cost.</DialogDescription>
+   443→   443→        </DialogHeader>
+   444→   444→        <form onSubmit={submit} className="space-y-4">
+   445→   445→          <div className="grid grid-cols-2 gap-3">
+   446→   446→            <Field label="Supplier *">
+   447→   447→              <Select value={supplierId} onValueChange={setSupplierId}>
+   448→   448→                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+   449→   449→                <SelectContent>
+   450→   450→                  {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name} — {s.country}</SelectItem>)}
+   451→   451→                </SelectContent>
+   452→   452→              </Select>
+   453→   453→            </Field>
+   454→   454→            <Field label="Status">
+   455→   455→              <Select value={status} onValueChange={setStatus}>
+   456→   456→                <SelectTrigger><SelectValue /></SelectTrigger>
+   457→   457→                <SelectContent>
+   458→   458→                  {['draft', 'sent', 'received', 'cancelled'].map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+   459→   459→                </SelectContent>
+   460→   460→              </Select>
+   461→   461→            </Field>
+   462→   462→          </div>
+   463→   463→
+   464→   464→          <div>
+   465→   465→            <div className="flex items-center justify-between mb-2">
+   466→   466→              <Label>Line Items</Label>
+   467→   467→              <Button type="button" size="sm" variant="outline" onClick={addItem}><Plus className="h-3 w-3 mr-1" /> Add Item</Button>
+   468→   468→            </div>
+   469→   469→            <div className="space-y-2">
+   470→   470→              {items.map((it, i) => {
+   471→   471→                const p = products.find(p => p.id === it.productId)
+   472→   472→                return (
+   473→   473→                  <div key={i} className="grid grid-cols-12 gap-2 items-end">
+   474→   474→                    <div className="col-span-7">
+   475→   475→                      <Select value={it.productId} onValueChange={v => updateItem(i, 'productId', v)}>
+   476→   476→                        <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+   477→   477→                        <SelectContent>
+   478→   478→                          {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} — cost ${p.cost} ({p.stockQty} in stock)</SelectItem>)}
+   479→   479→                        </SelectContent>
+   480→   480→                      </Select>
+   481→   481→                    </div>
+   482→   482→                    <div className="col-span-3">
+   483→   483→                      <Input type="number" min="1" value={it.qty} onChange={e => updateItem(i, 'qty', e.target.value)} placeholder="Qty" />
+   484→   484→                    </div>
+   485→   485→                    <div className="col-span-1 text-right text-sm font-medium tabular-nums">
+   486→   486→                      ${p ? (p.cost * (parseInt(it.qty) || 0)).toFixed(0) : '—'}
+   487→   487→                    </div>
+   488→   488→                    <div className="col-span-1">
+   489→   489→                      {items.length > 1 && (
+   490→   490→                        <Button type="button" size="icon" variant="ghost" onClick={() => removeItem(i)} className="h-8 w-8 text-rose-500">
+   491→   491→                          <Trash2 className="h-3.5 w-3.5" />
+   492→   492→                        </Button>
+   493→   493→                      )}
+   494→   494→                    </div>
+   495→   495→                  </div>
+   496→   496→                )
+   497→   497→              })}
+   498→   498→            </div>
+   499→   499→          </div>
+   500→   500→
+   501→   501→          <div className="flex items-center justify-between pt-3 border-t">
+   502→   502→            <span className="text-sm text-muted-foreground">PO Total (at cost)</span>
+   503→   503→            <span className="text-xl font-bold tabular-nums">${total.toFixed(2)}</span>
+   504→   504→          </div>
+   505→   505→
+   506→   506→          <ErrorAlert error={error} />
+   507→   507→          <DialogFooter>
+   508→   508→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   509→   509→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Create PO</Button>
+   510→   510→          </DialogFooter>
+   511→   511→        </form>
+   512→   512→      </DialogContent>
+   513→   513→    </Dialog>
+   514→   514→  )
+   515→   515→}
+   516→   516→
+   517→   517→// ============ Employee Form ============
+   518→   518→export function EmployeeForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   519→   519→  const [loading, setLoading] = useState(false)
+   520→   520→  const [error, setError] = useState('')
+   521→   521→  const [form, setForm] = useState({
+   522→   522→    name: '', email: '', department: 'Sales', role: 'Sales Rep',
+   523→   523→    salary: '', hireDate: new Date().toISOString().slice(0, 10), status: 'active',
+   524→   524→  })
+   525→   525→
+   526→   526→  async function submit(e: React.FormEvent) {
+   527→   527→    e.preventDefault()
+   528→   528→    setLoading(true); setError('')
+   529→   529→    try {
+   530→   530→      const res = await fetch('/api/erp/employees', {
+   531→   531→        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+   532→   532→      })
+   533→   533→      const data = await res.json()
+   534→   534→      if (!res.ok) throw new Error(data.error || 'Failed')
+   535→   535→      onCreated(); onClose()
+   536→   536→      setForm({ name: '', email: '', department: 'Sales', role: 'Sales Rep', salary: '', hireDate: new Date().toISOString().slice(0, 10), status: 'active' })
+   537→   537→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   538→   538→  }
+   539→   539→
+   540→   540→  return (
+   541→   541→    <Dialog open={open} onOpenChange={onClose}>
+   542→   542→      <DialogContent>
+   543→   543→        <DialogHeader>
+   544→   544→          <DialogTitle>Add New Employee</DialogTitle>
+   545→   545→          <DialogDescription>Onboard a new employee to your organization.</DialogDescription>
+   546→   546→        </DialogHeader>
+   547→   547→        <form onSubmit={submit} className="space-y-4">
+   548→   548→          <div className="grid grid-cols-2 gap-3">
+   549→   549→            <Field label="Full Name *"><Input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+   550→   550→            <Field label="Email *"><Input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+   551→   551→            <Field label="Department *">
+   552→   552→              <Select value={form.department} onValueChange={v => setForm({ ...form, department: v })}>
+   553→   553→                <SelectTrigger><SelectValue /></SelectTrigger>
+   554→   554→                <SelectContent>
+   555→   555→                  {['Executive', 'Finance', 'Sales', 'Operations', 'Engineering', 'HR'].map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+   556→   556→                </SelectContent>
+   557→   557→              </Select>
+   558→   558→            </Field>
+   559→   559→            <Field label="Role / Title *"><Input required value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} /></Field>
+   560→   560→            <Field label="Annual Salary ($) *"><Input required type="number" step="1000" value={form.salary} onChange={e => setForm({ ...form, salary: e.target.value })} placeholder="0" /></Field>
+   561→   561→            <Field label="Hire Date"><Input type="date" value={form.hireDate} onChange={e => setForm({ ...form, hireDate: e.target.value })} /></Field>
+   562→   562→            <Field label="Status">
+   563→   563→              <Select value={form.status} onValueChange={v => setForm({ ...form, status: v })}>
+   564→   564→                <SelectTrigger><SelectValue /></SelectTrigger>
+   565→   565→                <SelectContent>
+   566→   566→                  <SelectItem value="active">Active</SelectItem>
+   567→   567→                  <SelectItem value="on_leave">On Leave</SelectItem>
+   568→   568→                  <SelectItem value="terminated">Terminated</SelectItem>
+   569→   569→                </SelectContent>
+   570→   570→              </Select>
+   571→   571→            </Field>
+   572→   572→          </div>
+   573→   573→          <ErrorAlert error={error} />
+   574→   574→          <DialogFooter>
+   575→   575→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   576→   576→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add Employee</Button>
+   577→   577→          </DialogFooter>
+   578→   578→        </form>
+   579→   579→      </DialogContent>
+   580→   580→    </Dialog>
+   581→   581→  )
+   582→   582→}
+   583→   583→
+   584→   584→// ============ Transaction Form ============
+   585→   585→export function TransactionForm({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+   586→   586→  const [loading, setLoading] = useState(false)
+   587→   587→  const [error, setError] = useState('')
+   588→   588→  const [form, setForm] = useState({
+   589→   589→    type: 'expense', category: 'Supplies', amount: '', description: '',
+   590→   590→    date: new Date().toISOString().slice(0, 10),
+   591→   591→  })
+   592→   592→
+   593→   593→  const INCOME_CATS = ['Product Sales', 'Service Revenue', 'Subscriptions', 'Licensing', 'Other Income']
+   594→   594→  const EXPENSE_CATS = ['Payroll', 'Rent', 'Utilities', 'Marketing', 'Supplies', 'Software', 'Travel', 'Equipment', 'Other Expense']
+   595→   595→
+   596→   596→  async function submit(e: React.FormEvent) {
+   597→   597→    e.preventDefault()
+   598→   598→    setLoading(true); setError('')
+   599→   599→    try {
+   600→   600→      const res = await fetch('/api/erp/transactions', {
+   601→   601→        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form),
+   602→   602→      })
+   603→   603→      const data = await res.json()
+   604→   604→      if (!res.ok) throw new Error(data.error || 'Failed')
+   605→   605→      onCreated(); onClose()
+   606→   606→      setForm({ type: 'expense', category: 'Supplies', amount: '', description: '', date: new Date().toISOString().slice(0, 10) })
+   607→   607→    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+   608→   608→  }
+   609→   609→
+   610→   610→  return (
+   611→   611→    <Dialog open={open} onOpenChange={onClose}>
+   612→   612→      <DialogContent>
+   613→   613→        <DialogHeader>
+   614→   614→          <DialogTitle>Add Transaction</DialogTitle>
+   615→   615→          <DialogDescription>Record a new income or expense entry.</DialogDescription>
+   616→   616→        </DialogHeader>
+   617→   617→        <form onSubmit={submit} className="space-y-4">
+   618→   618→          <div className="grid grid-cols-2 gap-3">
+   619→   619→            <Field label="Type *">
+   620→   620→              <Select value={form.type} onValueChange={v => setForm({ ...form, type: v, category: v === 'income' ? INCOME_CATS[0] : EXPENSE_CATS[0] })}>
+   621→   621→                <SelectTrigger><SelectValue /></SelectTrigger>
+   622→   622→                <SelectContent>
+   623→   623→                  <SelectItem value="income">Income</SelectItem>
+   624→   624→                  <SelectItem value="expense">Expense</SelectItem>
+   625→   625→                </SelectContent>
+   626→   626→              </Select>
+   627→   627→            </Field>
+   628→   628→            <Field label="Category *">
+   629→   629→              <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
+   630→   630→                <SelectTrigger><SelectValue /></SelectTrigger>
+   631→   631→                <SelectContent>
+   632→   632→                  {(form.type === 'income' ? INCOME_CATS : EXPENSE_CATS).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+   633→   633→                </SelectContent>
+   634→   634→              </Select>
+   635→   635→            </Field>
+   636→   636→            <Field label="Amount ($) *"><Input required type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="0.00" /></Field>
+   637→   637→            <Field label="Date"><Input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></Field>
+   638→   638→          </div>
+   639→   639→          <Field label="Description *"><Input required value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="e.g. Q3 marketing campaign" /></Field>
+   640→   640→          <ErrorAlert error={error} />
+   641→   641→          <DialogFooter>
+   642→   642→            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+   643→   643→            <Button type="submit" disabled={loading}>{loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Add Transaction</Button>
+   644→   644→          </DialogFooter>
+   645→   645→        </form>
+   646→   646→      </DialogContent>
+   647→   647→    </Dialog>
+   648→   648→  )
+   649→   649→}
+   650→   650→
