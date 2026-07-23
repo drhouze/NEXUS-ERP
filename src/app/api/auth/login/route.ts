@@ -51,7 +51,14 @@ export async function POST(req: NextRequest) {
       modulePermissions: (user as any).modulePermissions || null,
       customRoleId: (user as any).customRoleId || null,
     } as any)
-    await setSessionCookie(token)
+
+    // Setting cookie can fail in some runtimes — guard it so we can still return a helpful error
+    try {
+      await setSessionCookie(token)
+    } catch (e) {
+      console.error('Set session cookie failed:', e)
+      // Continue — we will still return token to the client in case cookie couldn't be set
+    }
 
     return NextResponse.json({
       ok: true,
@@ -62,7 +69,14 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (e: any) {
-    console.error('Login error:', e?.message)
+    // Log full error (including stack) so Vercel function logs capture it
+    console.error('Login error:', e)
+
+    // If DEBUG_API_ERRORS=true in environment, return error details in the JSON response to help debugging.
+    if (process.env.DEBUG_API_ERRORS === 'true') {
+      return NextResponse.json({ error: 'Server error', detail: e?.message, stack: e?.stack }, { status: 500 })
+    }
+
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
